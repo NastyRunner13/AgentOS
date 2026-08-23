@@ -1,0 +1,31 @@
+# Agent-facing build contract — local only, never commit
+AGENTARCH.md
+AGENTARCH*
+
+# Secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node / Tauri
+node_modules/
+dist/
+build/
+target/
+
+# Local data & evals
+*.sqlite
+*.db
+data/
+evals/runs/
+
+# OS junk
+Thumbs.db
+.DS_Store
