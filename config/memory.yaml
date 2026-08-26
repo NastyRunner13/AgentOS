@@ -1,0 +1,7 @@
+# Write path. 0 = confirmed facts only, 1 = librarian proposals,
+# 2 = auto-consolidate (not earned — AGENTARCH.md STAGE 2 AUTO-CONSOLIDATE: LOCKED).
+stage: 1
+recall_limit: 8
+consolidate_episode_limit: 40
+max_proposals_per_pass: 10
+librarian_fail_stuck: 2
