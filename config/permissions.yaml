@@ -1,0 +1,52 @@
+card:
+  expiry_seconds: 300
+  expire_action: deny
+
+autonomy: suggest_only
+
+shell:
+  ring_allowlisted: 1
+  ring_other: 2
+  timeout_seconds: 60
+  working_directory: .
+  allowlist:
+    - echo
+    - dir
+    - ls
+    - Get-ChildItem
+    - Get-Date
+    - Get-Location
+    - pwd
+    - whoami
+    - python --version
+    - py --version
+    - where.exe
+    - Write-Output
+
+files:
+  approved_roots:
+    - .
+    - data
+  read_ring: 0
+  write_ring: 1
+  delete_ring: 2
+  delete_size_threshold_bytes: 1048576
+  delete_over_threshold_ring: 3
+
+browser:
+  ring: 1
+  headless: false
+
+operator:
+  ring: 1
+  max_verify_failures: 2
+  min_ground_confidence: 0.5
+  allowlist:
+    notepad: {exe: notepad.exe}
+    chrome: {exe: chrome.exe, kind: playwright}
+    msedge: {exe: msedge.exe, kind: playwright}
+    edge: {exe: msedge.exe, kind: playwright}
+    browser: {kind: playwright}
+    code: {exe: Code.exe}
+    explorer: {exe: explorer.exe}
+    spotify: {exe: Spotify.exe}
