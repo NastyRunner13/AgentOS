@@ -4,8 +4,10 @@ A resident desktop AI agent for Windows: wake-word voice loop, model-agnostic mu
 layered knowledge base, MCP integration, vision-driven computer control, and a self-hosted
 phone/dashboard interface.
 
-> **Agents building or changing AgentOS**: work from [AGENTARCH.md](AGENTARCH.md) — it carries
-> the build sequence with done-conditions and runtime contracts. This doc is rationale only.
+> **Agents building or changing AgentOS**: work from [AGENTARCH.md](AGENTARCH.md) for the
+> build sequence, done-conditions, and runtime contracts. Work from [PRINCIPLES.md](PRINCIPLES.md)
+> when adding a **loop**, a **node**, a skill, a schedule, or anything that runs while the
+> user is away. This doc is rationale only.
 
 ---
 
@@ -27,6 +29,7 @@ flowchart TB
 
     subgraph KERNEL["Kernel — asyncio event bus"]
         TASKS["Task Manager<br/>background slots · mid-task steering"]
+        LOOPS["Loops<br/>cadence · goal · event"]
         SESS["Session Manager"]
         PERMS["Permission Gate<br/>risk rings 0–3"]
     end
@@ -35,7 +38,7 @@ flowchart TB
 
     subgraph BRAIN["Brain"]
         SPAWN["Sub-Agent Factory<br/>coder · researcher · operator · librarian"]
-        SKILLS["Skills Library<br/>self-created SKILL.md"]
+        SKILLS["Skills + workflows<br/>SKILL.md · saved graphs"]
         REG["Model Registry<br/>roles: master/fast/vision/embeddings"]
     end
 
@@ -66,19 +69,9 @@ flowchart TB
 ```
 
 **One process, many engines.** Everything plugs into an asyncio event bus so voice,
-clients, tools, and sub-agents share one session/state.
-
-### Engineering principles
-1. **Trustworthy core beats broad demo.** A narrow scope that works 95% of the time first;
-   breadth is added only on top of a loop we trust.
-2. **Buy > build.** openWakeWord/Porcupine, faster-whisper, Piper, Playwright, solid MCP
-   clients, embedded DBs — assemble proven parts, don't reinvent them.
-3. **Measure everything.** No memory, skill, or computer-use change ships without eval
-   numbers (success rate, latency, cost, human interventions).
-4. **Recovery is a feature.** Every loop (operator, librarian, miner) has an explicit,
-   fast "I'm wrong / I'm stuck → escalate or ask" path. No silent flailing.
-5. **Config is code.** `models/permissions/skills/MCP` configs live in git-friendly YAML;
-   changes are versioned so rollback is trivial.
+clients, tools, and sub-agents share one session/state. Recurring work is a **loop**
+(cadence / goal / event), not another chat. Multi-item work is a graph of **nodes**.
+The rules that survive every phase live in [PRINCIPLES.md](PRINCIPLES.md).
 
 ---
 
@@ -110,9 +103,43 @@ roles:                    # swap anytime, zero code changes
   - `researcher` — web search/fetch loops, writes findings into the KB
   - `operator` — GUI/browser control (see §6)
   - `librarian` — KB read/write, consolidation (see §3)
-- Handoff protocol: sub-agents return `{status, result, artifacts[], kb_writes[]}`.
+- Handoff protocol: each **node** returns a schema (`{status, result, artifacts[], kb_writes[]}`
+  as the baseline). Validation retries at the tool layer so the next **node** does not parse vibes.
+- The maker never marks its own work **verified**. A checker is a different prompt (often `fast`)
+  with no view of the maker's chain of thought; a machine signal beats a second LLM.
 - A cheap "router" pass classifies trivial requests ("what time is it") to the fast local
-  model, saving cost/latency.
+  model, saving cost/latency. Control flow after that classification lives in code
+  (`if` / `switch` on the schema), so Friday cannot skip an audit it was not given as a branch.
+
+### Loops — Friday prompts Friday
+A **task** is one background shot the user can **steer**. A **loop** is a system: an
+automation fires, Friday reads **resume** + **charter**, does the work, a **verified**
+signal accepts or rejects, state is written, a cap or a **card** stops it.
+
+Three automations:
+
+| Kind | Fires | Stops |
+|---|---|---|
+| Cadence | schedule (morning briefing, weekly bump) | the run ends; next tick is a new run |
+| Goal | now, or on an event | a condition scored by `fast` or a machine check is true |
+| Event | kernel bus, filesystem watch, MCP webhook | one shot, or it arms a goal |
+
+Overnight output is a ring 0–1 draft. Ring 2–3 still need a **card**. First **loop** is
+one job, one skill, one **resume**, one **verified** signal, then a schedule. The
+4-condition test and the rest of the rules: [PRINCIPLES.md](PRINCIPLES.md).
+
+### Graphs — shape of a job
+A sequential tool loop is the right shape for a single chat. Multi-item or multi-source
+work is a graph: **nodes** with schema contracts, **edges** that carry data (flatten /
+dedupe / filter in code), diamond (split → parallel work → merge) as the default fan-out.
+
+Wait for every **node** only when the next stage needs the whole set. Fan-in tolerates
+a missing input. Writers that run together get isolation (worktree / separate root).
+Models are tiered per **node**, not inherited from `master` for the whole fan-out.
+
+Saved graphs live in `workflows/` next to skills, launched by name, by chat, or by a
+**loop**. The master may write an orchestration script for a job that cannot be planned
+in advance; one hand-drawn diamond ships before that.
 
 ---
 
@@ -126,6 +153,13 @@ roles:                    # swap anytime, zero code changes
 | L2 Episodic | Every interaction log (who/when/what/tools/results) | SQLite (`events` table) |
 | L3 Semantic | Vector index of docs, notes, research, transcripts | LanceDB or Chroma (local) |
 | L4 Graph | Entities + relationships, facts, preferences | KuzuDB (embedded graph DB) |
+
+A **loop** also reads two files that are not these layers:
+
+- **charter** — standing user goals and hard constraints, reread every run so summarization
+  cannot drop "never do X." Distinct from the system prompt in `models.yaml`.
+- **resume** — `{done, next, rejected[], spend, last_verified}`. Tomorrow continues.
+  L1 is a scratchpad. L2 is an audit log. Neither is **resume**.
 
 ### Why both graph AND vectors?
 - Vectors answer *"anything like X?"* (fuzzy recall).
@@ -212,11 +246,18 @@ successful trajectory (episodic L2)
 **Autonomy dial** (`permissions.yaml`, default **`suggest_only`**):
 `suggest_only | auto_create_low_risk | fully_autonomous`.
 
+Community skills are **untrusted** until a human reads the source. Install is a **card**.
+A **loop** that auto-installs skills inherits every injection in their descriptions.
+
 ### MCP = borrowed capabilities
 - `mcp_manager`: spawns/connects any MCP server (stdio/SSE), merges its tools into the
   master's tool list dynamically.
 - Config: `mcp_servers.json` — filesystem, GitHub, browser, Notion, whatever you add.
 - MCP tools and native tools are indistinguishable to the model.
+- Connectors exist so a **loop** can act in the real environment (open the PR, update the
+  ticket, ping the channel, watch the disk), not only describe what it would do. Rank
+  them by whether the **loop** can finish the job: GitHub, filesystem/calendar watches,
+  Linear/Jira, Slack, error tracker.
 
 ---
 
@@ -351,10 +392,12 @@ Approval requests are cards showing **what / why / exact command preview / risk 
 - While blocked, that task pauses but everything else keeps running (see below).
 
 ### Background operation & multitasking (you keep working, Friday keeps working)
-The kernel runs a **task manager with N concurrent slots**; the conversation is never blocked:
+The kernel runs a **task manager with N concurrent slots**; the conversation is never blocked.
+Independent work fans out as **nodes**. "Research these 5 laptops" is five researcher
+**nodes**, a code reduce, one synthesizer, not one researcher chewing them in a line.
 ```
 you: "research these 5 laptops and build me a comparison doc"
-     └─ task #1 spawns researcher sub-agent ... runs in background ...
+     └─ task #1 diamond: 5 researcher nodes → reduce → synthesizer
 you: "meanwhile open Spotify"          ← instant, interleaved
 you: "also use Chrome not Edge for #1" ← mid-task steering, routes into task #1
 ...20 min later...
@@ -378,9 +421,16 @@ Friday: 🔔 "Laptop comparison ready — want me to email it?"   (voice if you'
 A small suite of repeatable scenarios run against the real stack:
 - desktop tasks: open app X → do Y → verify Z (state-checked programmatically)
 - multi-step research + file write · permission-gated actions · memory recall after N turns
-- tracked per run: **success %, end-to-end latency, token cost, # human interventions**
+- tracked per run: **success %, end-to-end latency, token cost, # human interventions,
+  cost per accepted outcome**
 Run before/after every meaningful change; the numbers gate Stage-2 memory, passive skill
-mining, and full-desktop operator freedom.
+mining, full-desktop operator freedom, and scheduling a **loop**.
+
+Loop-shaped scenarios sit next to the desktop ones: a known-bad artifact the **verified**
+signal rejects; **resume** after process restart; false-done (maker claims complete,
+checker or test says no); fan-out with one dead worker still merging; the token cap
+killing a runaway. If fewer than half of a **loop**'s outputs survive **verified**,
+the **loop** is creating review work.
 
 ### Latency & perceived speed
 The full loop (wake → STT → retrieval → master → sub-agents → vision → TTS) can feel
@@ -417,6 +467,13 @@ sluggish — so:
 - Everything logged to L2 → full audit trail: what ran, what it saw, what it did, who
   approved.
 
+**Unattended Friday.** A **loop** at 3am is an attack surface at 3am. Overnight work
+stays ring 0–1 and produces drafts. Ring 2–3 wait on a **card**. Long runs use quiet
+logging so secrets never scatter into L2. Loop permissions are re-audited on a 30-day
+calendar. Skill text is **untrusted**; install from the internet is a **card** after a
+human reads the source. The user still reads the overnight digest. The live feed does
+not replace that. Full rules: [PRINCIPLES.md](PRINCIPLES.md).
+
 ---
 
 ## 11. Repo Layout
@@ -424,6 +481,8 @@ sluggish — so:
 ```
 AgentOS/
 ├─ ARCHITECTURE.md          ← this file
+├─ AGENTARCH.md             ← phases, contracts, leading words
+├─ PRINCIPLES.md            ← how we build; loops, graphs, unattended
 ├─ config/
 │  ├─ models.yaml  voice.yaml  permissions.yaml  mcp_servers.json
 ├─ kernel/                  # event bus, sessions, task manager (concurrency), permission gate
@@ -437,23 +496,29 @@ AgentOS/
 ├─ desktop/                 # Tauri 2 app: main window + transparent orb overlay
 ├─ dashboard/               # phone PWA build (reuses ui/)
 ├─ skills/                  # SKILL.md library (user-editable, agent-extensible)
+├─ workflows/               # saved graphs, launched by name / chat / loop
 └─ main.py                  # entrypoint: boots kernel + selected voice mode
 ```
 
 ## 12. Build Order — collapsed, trustworthy-core first
 
-1. **Phase 1 — The loop that deserves trust** ✱everything downstream depends on this✱
+1. **Phase 1 — The chat loop that deserves trust** ✱everything downstream depends on this✱
    kernel event bus + task manager · model registry · master agent w/ clarification &
    permission cards · basic tools (shell, files, Playwright browser) · simple sub-agent
    spawning · SQLite episodic logging · CLI chat loop.
-2. **Phase 2 — Reliability layer**: verified computer use (a11y-first, allowlist apps),
+2. **Phase 1b — First real loop** (after Phase 1; may run beside Phase 2; required before
+   Phase 6): one recurring machine-checkable job. Manual run → one skill → **resume** →
+   **verified** signal → schedule or event. Caps declared. Overnight output is a draft.
+   No swarm, no self-drawn graph. Rules: [PRINCIPLES.md](PRINCIPLES.md).
+3. **Phase 2 — Reliability layer**: verified computer use (a11y-first, allowlist apps),
    stuck/escalate protocol, **eval harness v1** running the repeatable scenario suite.
-3. **Phase 3 — Memory stage 0→1**: episodic stays; user-confirmed facts; librarian proposals
+4. **Phase 3 — Memory stage 0→1**: episodic stays; user-confirmed facts; librarian proposals
    with bulk-approve; minimal graph schema. Vectors/graph retrieval on when useful,
    auto-consolidation gated by evals.
-4. **Phase 4 — Voice**: openWakeWord/faster-whisper/Piper local pipeline (+ `tts.amplitude`
+5. **Phase 4 — Voice**: openWakeWord/faster-whisper/Piper local pipeline (+ `tts.amplitude`
    events), cloud adapters after local works.
-5. **Phase 5 — Surfaces**: desktop app (Tauri) main window + action feed first; orb overlay;
+6. **Phase 5 — Surfaces**: desktop app (Tauri) main window + action feed first; orb overlay;
    phone PWA + Tailscale last (optional early — many days you'll live in desktop + voice).
-6. **Phase 6 — Earned autonomy**: Stage-2 memory consolidation, passive skill mining,
-   full-desktop operator freedom — each unlocked only when its eval numbers say so.
+7. **Phase 6 — Earned autonomy**: Stage-2 memory consolidation, passive skill mining,
+   full-desktop operator freedom, further loops and saved graphs — each unlocked only
+   when its eval numbers say so.
