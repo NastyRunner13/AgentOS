@@ -7,6 +7,7 @@ Python 3.11+ desktop agent kernel ("Friday") for Windows. Phases 1–2 are imple
 - [AGENTARCH.md](AGENTARCH.md) — the working contract: build phases with DONE WHEN acceptance criteria, bus topics, permission rings, leading-word definitions. **Behavior changes are specified here first**, then implemented.
 - [PRINCIPLES.md](PRINCIPLES.md) — mandatory before adding a **loop**, **node**, skill, schedule, verifier, memory write path, or anything unattended.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — design *rationale* only, not the behavior spec.
+- [CONTRIBUTIONS.md](CONTRIBUTIONS.md) — how a patch lands: spec-first, tests, commit shape, review bar.
 - Tokens (**verified**, **card**, **ring**, **loop**, **resume**, **charter**, **node**, **edge**, **stuck**, **untrusted**, **earned**, **steer**) have exact meanings in AGENTARCH.md — use them precisely in docs, prompts, and reviews.
 
 ## Commands
