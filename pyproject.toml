@@ -11,6 +11,8 @@ dependencies = [
     "mss>=9.0",
     "pillow>=10.0",
     "pywinauto>=0.6.8",
+    "rich>=13.0",
+    "prompt-toolkit>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -22,4 +24,4 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.setuptools.packages.find]
-include = ["kernel*", "brain*", "memory*", "tools*", "evals*"]
+include = ["kernel*", "brain*", "memory*", "tools*", "evals*", "ui*"]
