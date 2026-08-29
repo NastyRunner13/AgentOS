@@ -38,10 +38,11 @@ Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY` (or retarget `config/
 | Registry, master, librarian | `brain/` |
 | L2 log, proposals, graph apply | `memory/` (`INSERT` into `facts`/`entities`/`edges` only inside `_apply` in `memory/graph.py`) |
 | Shell, files, browser, computer | `tools/` |
+| CLI renderer, slash menu, session files | `ui/` |
 | Scenario suite | `evals/` |
 | DONE WHEN coverage | `tests/test_phaseN.py` |
 
-Directories named in ARCHITECTURE.md §11 (`voice/`, `mcp/`, `server/`, `ui/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) do not exist. Do not import them. Do not scaffold them as empty packages.
+Directories named in ARCHITECTURE.md §11 that are still absent (`voice/`, `mcp/`, `server/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) — do not import them. Do not scaffold them as empty packages. `ui/` is the CLI surface (`python main.py --cli`).
 
 ## Tests
 

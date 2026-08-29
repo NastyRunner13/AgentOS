@@ -20,8 +20,8 @@ Python 3.11+ desktop agent kernel ("Friday") for Windows. Phases 1–2 are imple
 
 ## Reality vs plan
 
-- Existing packages: `kernel/` (bus, tasks, permission gate), `brain/` (registry, master, librarian), `memory/` (SQLite L2 + stage-1 graph/proposals), `tools/` (shell/files/browser/computer/kb_*), plus `config/` and `tests/`.
-- Directories in ARCHITECTURE.md §11 (`voice/`, `mcp/`, `server/`, `ui/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) do **not** exist yet — don't import or build against them.
+- Existing packages: `kernel/` (bus, tasks, permission gate), `brain/` (registry, master, librarian), `memory/` (SQLite L2 + stage-1 graph/proposals), `tools/` (shell/files/browser/computer/kb_*), `ui/` (CLI renderer, completer, session files), plus `config/` and `tests/`.
+- Directories in ARCHITECTURE.md §11 that are still absent (`voice/`, `mcp/`, `server/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) — don't import or build against them. `ui/` is the CLI surface only.
 
 ## Gotchas
 
@@ -32,5 +32,5 @@ Python 3.11+ desktop agent kernel ("Friday") for Windows. Phases 1–2 are imple
 - Run pytest/python from the repo root — imports (`from kernel import ...`) rely on `pythonpath = ["."]`; `main.py` takes `--root` otherwise.
 - `.env` loads from repo root; OpenRouter is the default provider (`OPENROUTER_API_KEY` in `.env.example`). Secrets never enter prompts, logs, or the episodic DB — pass user/error text through `Master.scrub`.
 - Every turn and tool result must be written to the episodic log (`memory.write`) — L2 is the audit trail and a Phase 1 done-condition.
-- Recall injects confirmed, currently-valid facts — never pending proposals, never L2 turns as facts. CLI: `/approve <id>` resolves a card or a memory proposal; `/approve all` bulk-approves proposals; `/consolidate` runs the librarian.
+- Recall injects confirmed, currently-valid facts — never pending proposals, never L2 turns as facts. CLI: a foreground **card** asks `y`/`n` inline; `/approve <id>` still resolves a card or a memory proposal; `/approve all` bulk-approves proposals; `/consolidate` runs the librarian. `/new` and `/resume` are CLI history only (not L2 facts).
 - Ship behavior changes as `config/` YAML diffs where possible; if a config schema changes, update the matching section of AGENTARCH.md in the same commit.
