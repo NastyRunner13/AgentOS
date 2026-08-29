@@ -74,11 +74,12 @@ def test_c_grep_no_automatic_graph_vector_writes():
         assert not forbidden_imports.search(text), path
         if insert_graph.search(text):
             writers.append(path.relative_to(ROOT).as_posix())
-    assert writers == ["memory/__init__.py"], writers
+    assert writers == ["memory/graph.py"], writers
 
-    src = (ROOT / "memory" / "__init__.py").read_text(encoding="utf-8")
-    propose_fn = src.split("def propose(")[1].split("def approve(")[0]
-    apply_fn = src.split("def _apply(")[1].split("def _fingerprint(")[0]
+    propose_src = (ROOT / "memory" / "proposals.py").read_text(encoding="utf-8")
+    apply_src = (ROOT / "memory" / "graph.py").read_text(encoding="utf-8")
+    propose_fn = propose_src.split("def propose(")[1].split("def approve(")[0]
+    apply_fn = apply_src.split("def _apply(")[1].split("def _fact_row(")[0]
     for table in ("facts", "entities", "edges"):
         assert f"INSERT INTO {table}" not in propose_fn
         assert f"INSERT INTO {table}" in apply_fn
