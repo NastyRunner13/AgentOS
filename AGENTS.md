@@ -25,9 +25,9 @@ Python 3.11+ desktop agent kernel ("Friday") for Windows. Phases 1–2 are imple
 
 ## Gotchas
 
-- Adding a tool to `SPECS` in `tools/__init__.py`: `Gate.classify` returns ring 2 (card required) for unknown tools unless you add a case. `tests/test_kernel.py::test_every_spec_has_explicit_ring` fails if the case is missing.
+- Adding a tool to `SPECS` in `tools/specs.py`: `Gate.classify` in `kernel/gate.py` returns ring 2 (card required) for unknown tools unless you add a case. `tests/test_kernel.py::test_every_spec_has_explicit_ring` fails if the case is missing.
 - `tests/test_phase1.py` loads the real `config/permissions.yaml` and asserts `config/models.yaml` contents (default provider, roles). Editing those files can break tests.
-- Graph writes happen only in `Episodic.approve`. `propose` / `kb_propose` / the librarian insert *proposals*. `tests/test_phase3.py::test_c_grep_no_automatic_graph_vector_writes` greps `STAGE 2 AUTO-CONSOLIDATE: LOCKED` in AGENTARCH.md, `config/memory.yaml` `stage` ∈ {0,1}, and `INSERT INTO facts|entities|edges` only inside `_apply`.
+- Graph writes happen only in `Episodic.approve`. `propose` / `kb_propose` / the librarian insert *proposals*. `tests/test_phase3.py::test_c_grep_no_automatic_graph_vector_writes` greps `STAGE 2 AUTO-CONSOLIDATE: LOCKED` in AGENTARCH.md, `config/memory.yaml` `stage` ∈ {0,1}, and `INSERT INTO facts|entities|edges` only inside `_apply` in `memory/graph.py`.
 - Async tests need no `@pytest.mark.asyncio` — `asyncio_mode = "auto"` is set in pyproject.toml. Tests use `FakeAdapter` (scripted per model id); no API keys needed.
 - Run pytest/python from the repo root — imports (`from kernel import ...`) rely on `pythonpath = ["."]`; `main.py` takes `--root` otherwise.
 - `.env` loads from repo root; OpenRouter is the default provider (`OPENROUTER_API_KEY` in `.env.example`). Secrets never enter prompts, logs, or the episodic DB — pass user/error text through `Master.scrub`.

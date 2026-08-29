@@ -36,7 +36,7 @@ Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY` (or retarget `config/
 | Memory **consolidate** stage and limits | `config/memory.yaml` (`stage` stays 0 or 1) |
 | Bus, tasks, **steer**, **card** wait | `kernel/` |
 | Registry, master, librarian | `brain/` |
-| L2 log, proposals, graph apply | `memory/` (`INSERT` into `facts`/`entities`/`edges` only inside `_apply`) |
+| L2 log, proposals, graph apply | `memory/` (`INSERT` into `facts`/`entities`/`edges` only inside `_apply` in `memory/graph.py`) |
 | Shell, files, browser, computer | `tools/` |
 | Scenario suite | `evals/` |
 | DONE WHEN coverage | `tests/test_phaseN.py` |
@@ -49,14 +49,14 @@ Directories named in ARCHITECTURE.md §11 (`voice/`, `mcp/`, `server/`, `ui/`, `
 - Async tests need no `@pytest.mark.asyncio`. `asyncio_mode = "auto"`.
 - Phase tests are the acceptance suite: `tests/test_phase1.py`, `tests/test_phase2.py`, `tests/test_phase3.py` map to AGENTARCH **DONE WHEN** clauses. A phase is complete or it is not.
 - `tests/test_phase1.py` loads the real `config/permissions.yaml` and asserts `config/models.yaml` (`default_provider`, roles). Editing those files can fail that file.
-- `tests/test_phase3.py::test_c_grep_no_automatic_graph_vector_writes` greps `STAGE 2 AUTO-CONSOLIDATE: LOCKED`, `config/memory.yaml` `stage` ∈ {0,1}, and `INSERT INTO facts|entities|edges` only inside `_apply`.
+- `tests/test_phase3.py::test_c_grep_no_automatic_graph_vector_writes` greps `STAGE 2 AUTO-CONSOLIDATE: LOCKED`, `config/memory.yaml` `stage` ∈ {0,1}, and `INSERT INTO facts|entities|edges` only inside `_apply` in `memory/graph.py`.
 - A memory, skill, computer-use, or **loop** change ships with eval numbers: success %, latency, token cost, human interventions, cost per accepted outcome. `python main.py --eval` writes JSON under `evals/runs/` (gitignored).
 
 ## Adding a tool
 
-1. Add the spec to `SPECS` in `tools/__init__.py`.
-2. Add an explicit `Gate.classify` case in `kernel/__init__.py`. Unknown tools are ring 2 (**card** required). `tests/test_kernel.py::test_every_spec_has_explicit_ring` fails if the case is missing.
-3. Dispatch it in `NativeTools.run` (or the operator for `computer`).
+1. Add the spec to `SPECS` in `tools/specs.py`.
+2. Add an explicit `Gate.classify` case in `kernel/gate.py`. Unknown tools are ring 2 (**card** required). `tests/test_kernel.py::test_every_spec_has_explicit_ring` fails if the case is missing.
+3. Dispatch it in `NativeTools.execute` (or the operator for `computer`).
 4. Every turn and tool result writes to the episodic log (`memory.write`). L2 is the audit trail and a Phase 1 done-condition.
 
 ## Safety
