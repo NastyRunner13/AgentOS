@@ -90,7 +90,29 @@ Each unlocks only when Phase 2's harness shows the numbers: stage-2 auto-consoli
 
 ### Event contracts
 
-Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`, `tool.result`, `approval.request`, `approval.resolved`, `tts.amplitude`, `error`. Task shape: `{id, title, status: queued|running|blocked|waiting_approval|done|failed, progress}`. **Card** payload: `{action_preview, reason, ring, expires_at}`.
+Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`, `tool.result`, `approval.request`, `approval.resolved`, `tts.amplitude`, `error`. Task shape: `{id, title, status: queued|running|blocked|waiting_approval|done|failed, progress}`. **Card** payload: `{action_preview, reason, ring, expires_at}`. `agent.state` phases: `thinking` (turn started), `token` (streamed text; model reasoning is wrapped in `<think>`…`</think>` and is not part of the assistant reply), `stuck`, `idle` (turn finished).
+
+### CLI surface
+
+`python main.py --cli` is the Phase 1 interactive surface (`ui/`). It is a prompt loop, not a full-screen TUI.
+
+**Transcript.** Each foreground turn prints: the user line; a thinking block (dim, collapsed to `thought <duration>` when the first non-thought token or tool arrives); one row per `tool.call` / `tool.result` (name, short args, **ring**, elapsed); the assistant reply as rendered markdown, not raw markers; a footer with wall-clock time, tool count, and **card** count. The CLI subscribes to `tool.call`, `tool.result`, and `approval.resolved` as well as `agent.state` / `approval.request` / `error`.
+
+**Prompt.** Foreground `Master.turn` is awaited. The Friday prompt is not shown during the stream; it is redrawn only after `idle` (or an error). Background **task** turns still run on the task manager and may print into the transcript while the prompt is idle. `patch_stdout` keeps those prints from eating the prompt.
+
+**Cards.** A **card** raised during a foreground turn asks `y` allow / `n` deny inline (the main prompt is not up, so `/approve` would deadlock). `/approve` and `/deny` remain for background **tasks** and for anyone who skipped the inline prompt. Ring 0–1 tools still run silent.
+
+**Sessions.** `data/sessions/<id>.json` stores CLI `history` (the same list `Master` uses) plus title, mode, timestamps. L2 is still the audit log; session files are not facts and are never recalled as facts. `/new` (alias `/reset`) writes the current session if it has turns, then starts a blank conversation. `/resume` lists recent sessions; `/resume <id>` loads one. `/sessions` lists. `/rename <title>` sets the title. Auto-save on `idle`. `/clear` only clears the screen.
+
+### Clarify-first
+
+`config/kernel.yaml` `clarify` (default true) scores each chat turn with `fast` before master. Prompt: `config/models.yaml` `prompts.clarify`.
+
+- Input: current user text plus the last 3 foreground `history` turns. No tools on the scorer.
+- `unclear` is only a missing user choice that would change the action (which path, which app, which person). Friday already has `files`, `shell`, `browser`, `computer`, and kb tools. An omitted path is the working directory.
+- `unclear` asks at most 3 questions, writes them to L2 and `history`, and returns without master. The next foreground user turn skips the scorer and runs master with that `history`.
+- `trivial` appends `[assumption]` and continues to master. `clear` continues.
+- Background **task** turns still score; they neither set nor consume the skip, and they do not receive CLI `history`.
 
 ### Permission rings
 

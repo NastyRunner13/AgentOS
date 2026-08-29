@@ -50,9 +50,14 @@ class OpenAICompat:
             return [row["embedding"] for row in sorted(data, key=lambda r: r["index"])]
 
 
+def _reasoning_piece(delta: dict) -> str:
+    return str(delta.get("reasoning") or delta.get("reasoning_content") or "")
+
+
 async def _consume_openai_sse(resp: httpx.Response, on_token: OnToken) -> tuple[str, list[dict]]:
     text = []
     calls: dict[int, dict] = {}
+    reasoning_open = False
     async for line in resp.aiter_lines():
         if not line:
             continue
@@ -67,8 +72,20 @@ async def _consume_openai_sse(resp: httpx.Response, on_token: OnToken) -> tuple[
             continue
         for choice in chunk.get("choices") or []:
             delta = choice.get("delta") or {}
+            thought = _reasoning_piece(delta)
+            if thought:
+                if not reasoning_open:
+                    reasoning_open = True
+                    if on_token:
+                        on_token("<think>")
+                if on_token:
+                    on_token(thought)
             piece = delta.get("content")
             if piece:
+                if reasoning_open:
+                    reasoning_open = False
+                    if on_token:
+                        on_token("</think>")
                 text.append(piece)
                 if on_token:
                     on_token(piece)
@@ -85,5 +102,7 @@ async def _consume_openai_sse(resp: httpx.Response, on_token: OnToken) -> tuple[
                     slot["function"]["name"] += fn["name"]
                 if fn.get("arguments"):
                     slot["function"]["arguments"] += fn["arguments"]
+    if reasoning_open and on_token:
+        on_token("</think>")
     ordered = [calls[i] for i in sorted(calls)]
     return "".join(text), ordered

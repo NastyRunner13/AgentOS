@@ -57,6 +57,7 @@ class Master:
         clarify: bool = True,
         max_tool_steps: int = 8,
         secrets: list[str] | None = None,
+        skills: list | None = None,
     ) -> None:
         self.registry = registry
         self.gate = gate
@@ -69,7 +70,9 @@ class Master:
         self.clarify = clarify
         self.max_tool_steps = max_tool_steps
         self.secrets = [s for s in (secrets or []) if s]
+        self.skills = skills or []
         self.history: list[dict] = []
+        self._awaiting_clarify = False
 
     def scrub(self, text: str) -> str:
         for secret in self.secrets:
@@ -95,17 +98,21 @@ class Master:
         self.memory.write("turn", content=text, role="user", meta={"task_id": task.id if task else None})
         self.bus.publish("agent.state", {"phase": "thinking", "task_id": task.id if task else None})
 
-        if self.clarify:
-            decision = await self._clarify(text)
+        skip_clarify = bool(self.clarify and task is None and self._awaiting_clarify)
+        if skip_clarify:
+            self._awaiting_clarify = False
+        elif self.clarify:
+            decision = await self._clarify(text, use_history=task is None)
             if decision.get("clarity") == "unclear":
                 questions = decision.get("questions") or ["What did you mean?"]
                 reply = "I need a bit more:\n" + "\n".join(f"- {q}" for q in questions[:3])
-                self._emit_text(reply, on_token)
+                self._emit_text(reply, on_token, task.id if task else None)
                 self.memory.write("turn", content=reply, role="assistant", meta={"task_id": task.id if task else None})
                 if task is None:
+                    self._awaiting_clarify = True
                     self.history.append({"role": "user", "content": text})
                     self.history.append({"role": "assistant", "content": reply})
-                self.bus.publish("agent.state", {"phase": "idle"})
+                self.bus.publish("agent.state", {"phase": "idle", "task_id": task.id if task else None})
                 return reply
             if decision.get("clarity") == "trivial" and decision.get("assumption"):
                 text = f"{text}\n\n[assumption] {decision['assumption']}"
@@ -120,28 +127,32 @@ class Master:
             self.history.append({"role": "user", "content": text})
             self.history.append({"role": "assistant", "content": reply})
         self.memory.write("turn", content=reply, role="assistant", meta={"task_id": task.id if task else None})
-        self.bus.publish("agent.state", {"phase": "idle"})
+        self.bus.publish("agent.state", {"phase": "idle", "task_id": task.id if task else None})
         return reply
 
-    async def _clarify(self, text: str) -> dict:
+    async def _clarify(self, text: str, *, use_history: bool = True) -> dict:
+        messages = [{"role": "system", "content": self.clarify_prompt}]
+        if use_history:
+            messages.extend(self.history[-6:])
+        messages.append({"role": "user", "content": text})
         try:
-            raw, _ = await self.registry.complete(
-                "fast",
-                [
-                    {"role": "system", "content": self.clarify_prompt},
-                    {"role": "user", "content": text},
-                ],
-            )
+            raw, _ = await self.registry.complete("fast", messages)
         except Exception:
             return {"clarity": "clear"}
         return _json_object(raw) or {"clarity": "clear"}
 
     def _system_with_facts(self, query: str) -> str:
+        prompt = self.system_prompt
+        if self.skills:
+            from brain.skills import format_skills_for_prompt
+            skills_block = format_skills_for_prompt(self.skills)
+            if skills_block:
+                prompt = f"{prompt}\n\n{skills_block}"
         facts = self.memory.recall(query)
         if not facts:
-            return self.system_prompt
+            return prompt
         lines = "\n".join(f"- {f['statement']}" for f in facts)
-        return f"{self.system_prompt}\n\nConfirmed facts (user-approved):\n{lines}"
+        return f"{prompt}\n\nConfirmed facts (user-approved):\n{lines}"
 
     async def _loop(self, conv: list[dict], task: Task | None, on_token: OnToken | None) -> str:
         last = ""
@@ -151,7 +162,7 @@ class Master:
 
             def capture(piece: str) -> None:
                 streamed.append(piece)
-                self._emit_text(piece, on_token)
+                self._emit_text(piece, on_token, task.id if task else None)
 
             try:
                 text, calls = await self.registry.complete(
@@ -165,7 +176,7 @@ class Master:
             steered = await self.drain_steer(task, conv)
             if not calls and not steered:
                 if not streamed and text:
-                    self._emit_text(text, on_token)
+                    self._emit_text(text, on_token, task.id if task else None)
                 return text
             conv.append(
                 {
@@ -225,7 +236,7 @@ class Master:
         self.bus.publish("tool.result", {"name": name, "result": self.scrub(result)[:500]})
         return result
 
-    def _emit_text(self, piece: str, on_token: OnToken | None) -> None:
-        self.bus.publish("agent.state", {"phase": "token", "text": piece})
+    def _emit_text(self, piece: str, on_token: OnToken | None, task_id: str | None = None) -> None:
+        self.bus.publish("agent.state", {"phase": "token", "text": piece, "task_id": task_id})
         if on_token:
             on_token(piece)

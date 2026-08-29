@@ -44,6 +44,7 @@ class AnthropicAdapter:
             ]
         text = []
         calls: dict[int, dict] = {}
+        thinking_open = False
         async with httpx.AsyncClient(timeout=_timeout(self.cfg)) as client:
             async with client.stream(
                 "POST",
@@ -61,7 +62,18 @@ class AnthropicAdapter:
                     ptype = payload.get("type")
                     if ptype == "content_block_delta":
                         delta = payload.get("delta") or {}
+                        if delta.get("type") == "thinking_delta" and delta.get("thinking"):
+                            if not thinking_open:
+                                thinking_open = True
+                                if on_token:
+                                    on_token("<think>")
+                            if on_token:
+                                on_token(delta["thinking"])
                         if delta.get("type") == "text_delta" and delta.get("text"):
+                            if thinking_open:
+                                thinking_open = False
+                                if on_token:
+                                    on_token("</think>")
                             text.append(delta["text"])
                             if on_token:
                                 on_token(delta["text"])
@@ -88,6 +100,8 @@ class AnthropicAdapter:
                                     "arguments": "",
                                 },
                             }
+        if thinking_open and on_token:
+            on_token("</think>")
         return "".join(text), [calls[i] for i in sorted(calls)]
 
 

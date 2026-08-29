@@ -11,6 +11,7 @@ import yaml
 import pytest
 
 from brain.registry import FakeAdapter, Registry
+from kernel import Task
 from memory import Episodic
 from tests.test_phase1 import _models, _stack
 
@@ -35,6 +36,74 @@ async def test_unclear_asks_and_skips_master(tmp_path: Path):
     reply = await master.turn("put it there")
     assert "which folder?" in reply
     assert all(c[0] != "master-a" for c in fake.calls)
+
+
+async def test_followup_after_unclear_skips_scorer(tmp_path: Path):
+    fake = FakeAdapter(
+        {
+            "script": {
+                "fast-a": [
+                    '{"clarity":"unclear","questions":["which folder?"]}',
+                    '{"clarity":"unclear","questions":["still lost?"]}',
+                ],
+                "master-a": "listed",
+            }
+        }
+    )
+    bus, gate, tasks, registry, memory, master = _stack(tmp_path, fake)
+    first = await master.turn("put it there")
+    assert "which folder?" in first
+    second = await master.turn("Downloads")
+    assert second == "listed"
+    assert sum(1 for c in fake.calls if c[0] == "fast-a") == 1
+    master_msgs = next(c[1] for c in fake.calls if c[0] == "master-a")
+    blob = " ".join(m["content"] for m in master_msgs)
+    assert "which folder?" in blob
+    assert "Downloads" in blob
+
+
+async def test_clarify_receives_session_history(tmp_path: Path):
+    payloads: list[list[dict]] = []
+
+    def score(messages, tools):
+        payloads.append(messages)
+        return '{"clarity":"clear"}'
+
+    fake = FakeAdapter({"script": {"fast-a": score, "master-a": "ok"}})
+    bus, gate, tasks, registry, memory, master = _stack(tmp_path, fake)
+    await master.turn("hello")
+    await master.turn("now list files")
+    assert len(payloads) == 2
+    second = payloads[1]
+    assert second[0]["role"] == "system"
+    contents = [m["content"] for m in second]
+    assert "hello" in contents
+    assert "ok" in contents
+    assert second[-1]["content"] == "now list files"
+
+
+async def test_task_unclear_does_not_skip_foreground_clarify(tmp_path: Path):
+    fake = FakeAdapter(
+        {
+            "script": {
+                "fast-a": [
+                    '{"clarity":"clear"}',
+                    '{"clarity":"unclear","questions":["which task folder?"]}',
+                    '{"clarity":"unclear","questions":["which cli folder?"]}',
+                ],
+                "master-a": "hello-ok",
+            }
+        }
+    )
+    bus, gate, tasks, registry, memory, master = _stack(tmp_path, fake)
+    await master.turn("hello")
+    reply = await master.turn("put it there", task=Task("t1", "bg"))
+    assert "which task folder?" in reply
+    task_clarify = next(c[1] for c in fake.calls if c[0] == "fast-a" and c[1][-1]["content"] == "put it there")
+    assert [m["content"] for m in task_clarify if m["role"] != "system"] == ["put it there"]
+    cli = await master.turn("put it there")
+    assert "which cli folder?" in cli
+    assert sum(1 for c in fake.calls if c[0] == "master-a") == 1
 
 
 async def test_trivial_assumption_appended(tmp_path: Path):
@@ -208,5 +277,9 @@ def test_openrouter_roles_and_memory_stage():
     models = yaml.safe_load((ROOT / "config" / "models.yaml").read_text(encoding="utf-8"))
     mem = yaml.safe_load((ROOT / "config" / "memory.yaml").read_text(encoding="utf-8"))
     assert "librarian" in (models.get("prompts") or {})
+    clarify = models["prompts"]["clarify"]
+    assert "files" in clarify
+    assert "shell" in clarify
+    assert "working directory" in clarify
     assert mem["stage"] in (0, 1)
     assert mem["stage"] < 2
