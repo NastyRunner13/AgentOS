@@ -4,3 +4,4 @@ max_tool_steps: 8
 clarify: true
 tool_result_max_chars: 8000
 stream_token_min_chars: 1
+skills_dir: ~/.agents/skills
