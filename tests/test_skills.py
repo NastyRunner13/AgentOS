@@ -8,6 +8,7 @@ import pytest
 from brain.skills import (
     Skill,
     find_skill,
+    format_skill_turn,
     format_skills_for_prompt,
     load_skills,
     parse_skill_file,
@@ -39,6 +40,7 @@ Run docker build and deploy.
     assert skill.description == "Deploys the application to staging or production."
     assert skill.source == "Global"
     assert skill.allowed_tools == ["shell", "files"]
+    assert skill.user_invocable is True
     assert "Run docker build" in skill.content
 
 
@@ -112,3 +114,25 @@ def test_format_skills_for_prompt():
     assert "Available procedural skills:" in prompt_block
     assert "- **alpha** (Global): Alpha skill" in prompt_block
     assert "- **beta** (Workspace): Beta skill" in prompt_block
+
+
+def test_parse_skill_user_invocable_false(tmp_path: Path):
+    skill_dir = tmp_path / "internal"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: internal\ndescription: Hidden from slash\nuser-invocable: false\n---\nBody\n",
+        encoding="utf-8",
+    )
+    skill = parse_skill_file(skill_dir / "SKILL.md")
+    assert skill is not None
+    assert skill.user_invocable is False
+
+
+def test_format_skill_turn():
+    skill = Skill(name="commit", description="Commit", path=Path("/c"), content="Write a commit.")
+    text = format_skill_turn(skill, "fix the build")
+    assert text.startswith("[skill:commit]")
+    assert "Write a commit." in text
+    assert "User request: fix the build" in text
+    bare = format_skill_turn(skill, "")
+    assert "Follow the skill instructions." in bare

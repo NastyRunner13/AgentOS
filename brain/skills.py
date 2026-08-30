@@ -22,6 +22,7 @@ class Skill:
     source: str = "Global"  # "Global", "Workspace", "Custom"
     content: str = ""
     allowed_tools: list[str] = field(default_factory=list)
+    user_invocable: bool = True
 
 
 def parse_skill_file(skill_md_path: Path, source: str = "Global") -> Skill | None:
@@ -34,6 +35,7 @@ def parse_skill_file(skill_md_path: Path, source: str = "Global") -> Skill | Non
     name = skill_md_path.parent.name
     description = "Custom agent skill"
     allowed_tools: list[str] = []
+    user_invocable = True
     content = raw
 
     # Check for YAML frontmatter: --- ... ---
@@ -52,6 +54,10 @@ def parse_skill_file(skill_md_path: Path, source: str = "Global") -> Skill | Non
                     tools = fm.get("allowed-tools") or fm.get("allowed_tools")
                     if isinstance(tools, list):
                         allowed_tools = [str(t) for t in tools]
+                    if "user-invocable" in fm:
+                        user_invocable = bool(fm.get("user-invocable"))
+                    elif "user_invocable" in fm:
+                        user_invocable = bool(fm.get("user_invocable"))
             except Exception:
                 pass
 
@@ -71,6 +77,7 @@ def parse_skill_file(skill_md_path: Path, source: str = "Global") -> Skill | Non
         source=source,
         content=content,
         allowed_tools=allowed_tools,
+        user_invocable=user_invocable,
     )
 
 
@@ -135,3 +142,14 @@ def find_skill(name: str, skills: list[Skill]) -> Skill | None:
         if s.name.lower() == norm:
             return s
     return None
+
+
+def format_skill_turn(skill: Skill, args: str = "") -> str:
+    """User-turn text that loads a skill body and the arguments after /name."""
+    request = args.strip() or "Follow the skill instructions."
+    return (
+        f"[skill:{skill.name}]\n"
+        "Follow this skill exactly.\n\n"
+        f"{skill.content}\n\n"
+        f"User request: {request}"
+    )

@@ -93,13 +93,21 @@ class Master:
             self.memory.write("steer", content=msg, role="user", meta={"task_id": task.id})
         return got
 
-    async def turn(self, text: str, task: Task | None = None, on_token: OnToken | None = None) -> str:
+    async def turn(
+        self,
+        text: str,
+        task: Task | None = None,
+        on_token: OnToken | None = None,
+        *,
+        skip_clarify: bool = False,
+    ) -> str:
         text = self.scrub(text)
         self.memory.write("turn", content=text, role="user", meta={"task_id": task.id if task else None})
         self.bus.publish("agent.state", {"phase": "thinking", "task_id": task.id if task else None})
 
-        skip_clarify = bool(self.clarify and task is None and self._awaiting_clarify)
         if skip_clarify:
+            self._awaiting_clarify = False
+        elif self.clarify and task is None and self._awaiting_clarify:
             self._awaiting_clarify = False
         elif self.clarify:
             decision = await self._clarify(text, use_history=task is None)
@@ -143,6 +151,8 @@ class Master:
 
     def _system_with_facts(self, query: str) -> str:
         prompt = self.system_prompt
+        if hasattr(self.tools, "root") and self.tools.root:
+            prompt = f"{prompt}\n\nCurrent workspace root directory: {self.tools.root}"
         if self.skills:
             from brain.skills import format_skills_for_prompt
             skills_block = format_skills_for_prompt(self.skills)
