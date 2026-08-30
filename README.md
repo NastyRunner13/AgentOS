@@ -44,7 +44,7 @@ python -m pytest -q            # Run test suite (offline, no keys needed)
 python main.py --eval          # Evaluation harness
 ```
 
-Inside the CLI: `/help` lists commands · `/new` and `/resume` manage conversations · `/reload` hot-reloads `config/*.yaml` · `/approve <id>` resolves a **card** or memory proposal. Ring-2 cards during a turn ask `y`/`n` inline.
+Inside the CLI: `/help` lists commands · `/new` starts a blank conversation · `/resume` picks a saved one · `/exit` quits · `/name` runs a skill · `/reload` hot-reloads `config/*.yaml` · `/approve <id>` resolves a **card** or memory proposal. Ring-2 cards during a turn ask `y`/`n` inline. The banner shows the workspace directory, git branch, and session id.
 
 ---
 

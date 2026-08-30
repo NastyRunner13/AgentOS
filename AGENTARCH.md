@@ -96,13 +96,17 @@ Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`
 
 `python main.py --cli` is the Phase 1 interactive surface (`ui/`). It is a prompt loop, not a full-screen TUI.
 
+**Header.** The banner names the workspace directory (home abbreviated to `~`), the current git branch when the workspace is a repo (omitted otherwise; detached HEAD shows the short hash), the session id, model, and mode.
+
 **Transcript.** Each foreground turn prints: the user line; a thinking block (dim, collapsed to `thought <duration>` when the first non-thought token or tool arrives); one row per `tool.call` / `tool.result` (name, short args, **ring**, elapsed); the assistant reply as rendered markdown, not raw markers; a footer with wall-clock time, tool count, and **card** count. The CLI subscribes to `tool.call`, `tool.result`, and `approval.resolved` as well as `agent.state` / `approval.request` / `error`.
 
-**Prompt.** Foreground `Master.turn` is awaited. The Friday prompt is not shown during the stream; it is redrawn only after `idle` (or an error). Background **task** turns still run on the task manager and may print into the transcript while the prompt is idle. `patch_stdout` keeps those prints from eating the prompt.
+**Composer.** Input is a framed text box (not a raw `>` prompt). Placeholder `message or /command`. Enter sends. The box is hidden during a foreground stream and redrawn after `idle` (or an error). Background **task** turns still run on the task manager and may print into the transcript while the prompt is idle. `patch_stdout` keeps those prints from eating the prompt. `/exit` (alias `/quit`) stops the process.
 
 **Cards.** A **card** raised during a foreground turn asks `y` allow / `n` deny inline (the main prompt is not up, so `/approve` would deadlock). `/approve` and `/deny` remain for background **tasks** and for anyone who skipped the inline prompt. Ring 0–1 tools still run silent.
 
-**Sessions.** `data/sessions/<id>.json` stores CLI `history` (the same list `Master` uses) plus title, mode, timestamps. L2 is still the audit log; session files are not facts and are never recalled as facts. `/new` (alias `/reset`) writes the current session if it has turns, then starts a blank conversation. `/resume` lists recent sessions; `/resume <id>` loads one. `/sessions` lists. `/rename <title>` sets the title. Auto-save on `idle`. `/clear` only clears the screen.
+**Sessions.** `data/sessions/<id>.json` stores CLI `history` (the same list `Master` uses) plus title, mode, timestamps. L2 is still the audit log; session files are not facts and are never recalled as facts. `/new` (alias `/reset`) writes the current session if it has turns, clears the screen, starts a blank conversation, and reprints the banner with the new session id. `/resume` with no argument opens a picker of recent sessions; `/resume <id>` loads that session. After a load, the CLI clears the screen, reprints the banner, and replays saved `history` so the window shows the past conversation. `/sessions` lists without switching. `/rename <title>` sets the title. Auto-save on `idle`. `/clear` only clears the screen and reprints the banner.
+
+**Skills as slash commands.** A loaded skill with `user-invocable` true (default) runs as `/<name> [args]`. `/skill <name> [args]` is the same. Built-in commands keep the bare name; a colliding skill is `/skill:<name>`. The invocation is a foreground turn: skill body plus the user's arguments. `/skills` lists. Unknown `/foo` is not sent to the model.
 
 ### Clarify-first
 
