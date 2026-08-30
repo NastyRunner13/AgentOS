@@ -102,13 +102,14 @@ def boot(root: Path):
 HELP = """\
 [bold cyan]Friday commands[/bold cyan]
   [bold white]/new[/bold white]                   Fresh conversation (saves the current one)
-  [bold white]/resume [id][/bold white]           List sessions, or load one
+  [bold white]/resume [id][/bold white]           Pick a session, or load one by id
   [bold white]/sessions[/bold white]              List saved conversations
   [bold white]/rename <title>[/bold white]        Name the current session
   [bold white]/help[/bold white]                  This cheatsheet
   [bold white]/mode [name][/bold white]           Code, Architect, Ask, Fast
   [bold white]/provider[/bold white]              Configured LLM providers
   [bold white]/skills[/bold white]                Active skills
+  [bold white]/skill <name> [args][/bold white]   Run a skill (also /<name>)
   [bold white]/plugins[/bold white]               Tools
   [bold white]/settings[/bold white]              Runtime dials
   [bold white]/task <title> <prompt>[/bold white] Background turn (steer-able)
@@ -123,12 +124,17 @@ HELP = """\
   [bold white]/roles[/bold white]                 Model role assignments
   [bold white]/clear[/bold white]                 Clear the screen (does not start a new session)
   [bold white]/reload[/bold white]                Reread YAML configs without restart
-  [bold white]/quit[/bold white]                  Exit
+  [bold white]/exit[/bold white]                  Stop the CLI (alias /quit)
 """
 
 
-def _create_prompt_session(stack_getter, get_toolbar, history_path: Path):
-    """Prompt_toolkit session with a two-line Friday box."""
+def _create_prompt_session(stack_getter, get_toolbar, get_title, history_path: Path):
+    """Framed composer, or a two-line PromptSession if the box cannot start."""
+    from ui.composer import create_composer
+
+    box = create_composer(stack_getter, get_toolbar, get_title, history_path)
+    if box is not None:
+        return box
     if not sys.stdin.isatty():
         return None
     try:
@@ -155,18 +161,24 @@ def _create_prompt_session(stack_getter, get_toolbar, history_path: Path):
         return None
 
 
-def _friday_prompt(store, mode: str):
+def _friday_prompt(store, mode: str, cwd: str = "", branch: str = ""):
     from prompt_toolkit.formatted_text import HTML
 
     title = html.escape((store.title or "new session")[:40])
     sid = html.escape(store.id)
     mode_s = html.escape(mode)
+    cwd_s = html.escape(cwd)
+    branch_bit = (
+        f' <style fg="#a6e3a1">{html.escape(branch)}</style>' if branch else ""
+    )
+    cwd_bit = f" <b>{cwd_s}</b>" if cwd_s else " <b>Friday</b>"
     return HTML(
-        f'<style fg="#89b4fa">╭─</style> <b>Friday</b>'
+        f'<style fg="#89b4fa">╭─</style>{cwd_bit}'
+        f"{branch_bit}"
         f' <style fg="#6c7086">{sid}</style>'
         f' <style fg="#a6e3a1">{mode_s}</style>'
         f' <style fg="#6c7086">{title}</style>\n'
-        f'<style fg="#89b4fa">╰▸</style> '
+        f'<style fg="#89b4fa">│</style> '
     )
 
 
@@ -182,15 +194,20 @@ async def run_cli(root: Path) -> None:
         SessionStore,
         TurnRenderer,
         console,
+        display_cwd,
+        git_branch,
+        pick_session,
         render_banner,
         render_card,
         render_facts,
+        render_history,
         render_proposals,
         render_roles,
         render_sessions,
         render_settings,
         render_tasks,
         render_user,
+        resolve_slash,
         show_mode_dialog,
         show_plugins_dialog,
         show_provider_dialog,
@@ -278,7 +295,35 @@ async def run_cli(root: Path) -> None:
     ]
 
     master_model = stack["models_cfg"].get("roles", {}).get("master", "claude-3-7-sonnet")
-    render_banner(model=master_model, mode=current_mode)
+
+    def workspace_bits() -> tuple[str, str]:
+        return display_cwd(root), git_branch(root)
+
+    def paint_shell(*, replay: bool = False, notice: str = "") -> None:
+        cwd_s, branch_s = workspace_bits()
+        console.clear()
+        render_banner(
+            model=master_model,
+            mode=current_mode,
+            cwd=cwd_s,
+            branch=branch_s,
+            session_id=store.id,
+            title=store.title,
+        )
+        if notice:
+            console.print(notice)
+        if replay:
+            render_history(master.history)
+
+    cwd_s, branch_s = workspace_bits()
+    render_banner(
+        model=master_model,
+        mode=current_mode,
+        cwd=cwd_s,
+        branch=branch_s,
+        session_id=store.id,
+        title=store.title,
+    )
 
     def get_bottom_toolbar():
         if HTML is None:
@@ -291,30 +336,85 @@ async def run_cli(root: Path) -> None:
             cards = len(gate.pending())
             tsks = stack.get("tasks")
             running_cnt = len([t for t in tsks.tasks.values() if t.status == "running"]) if tsks else 0
+            cwd_s, branch_s = workspace_bits()
             card_bit = (
-                f" | <style fg='ansired'><b>Cards:</b> {cards}</style> " if cards else ""
+                f" <style fg='ansired'><b>\U0001f534 {cards} cards</b></style> \u2502"
+                if cards
+                else ""
+            )
+            task_bit = (
+                f" <style fg='ansigreen'>\u25cf {running_cnt} tasks</style> \u2502"
+                if running_cnt
+                else f" \u2699 {running_cnt} tasks \u2502"
+            )
+            branch_bit = (
+                f" <style fg='#a6e3a1'>{html.escape(branch_s)}</style> \u2502"
+                if branch_s
+                else ""
             )
             return HTML(
-                f" <b>Model</b> {m_model} "
-                f" | <b>Mode</b> {html.escape(current_mode)} "
-                f" | <b>Session</b> {html.escape(store.id)} "
-                f"{card_bit}"
-                f" | facts {facts_cnt}  proposals {prop_cnt}  tasks {running_cnt} "
-                f" | <i>/new /resume /help</i> "
+                f" {html.escape(cwd_s)} \u2502"
+                f"{branch_bit}"
+                f" {m_model}"
+                f" \u2502 {html.escape(current_mode)}"
+                f" \u2502 <style fg='#6c7086'>{html.escape(store.id)}</style>"
+                f" \u2502{card_bit}"
+                f" {facts_cnt} facts \u2502"
+                f" {prop_cnt} proposals \u2502"
+                f"{task_bit}"
+                f" <i>/help</i> "
             )
         except Exception:
-            return HTML(" <b>Friday</b> | /help ") if HTML else None
+            return HTML(" <b>Friday</b> \u2502 /help ") if HTML else None
 
-    session = _create_prompt_session(lambda: stack, get_bottom_toolbar, data_dir / ".cli_history")
+    def get_composer_title():
+        if HTML is None:
+            return f"{store.id} {current_mode}"
+        cwd_s, branch_s = workspace_bits()
+        bits = [f"<b>{html.escape(cwd_s)}</b>"]
+        if branch_s:
+            bits.append(f'<style fg="#a6e3a1">{html.escape(branch_s)}</style>')
+        bits.append(f'<style fg="#6c7086">{html.escape(store.id)}</style>')
+        bits.append(f'<style fg="#a6e3a1">{html.escape(current_mode)}</style>')
+        title = html.escape((store.title or "new session")[:32])
+        bits.append(f'<style fg="#6c7086">{title}</style>')
+        return HTML(" · ".join(bits))
+
+    session = _create_prompt_session(
+        lambda: stack, get_bottom_toolbar, get_composer_title, data_dir / ".cli_history"
+    )
     patch_ctx = patch_stdout(raw=True) if patch_stdout and session else None
 
     async def read_line() -> str:
         if session:
+            from ui.composer import Composer
+
+            if isinstance(session, Composer):
+                return await session.prompt_async()
+            cwd_s, branch_s = workspace_bits()
             return await session.prompt_async(
-                lambda: _friday_prompt(store, current_mode),
+                lambda: _friday_prompt(store, current_mode, cwd_s, branch_s),
                 placeholder=HTML('<style color="#6c7086">message or /command</style>') if HTML else None,
             )
         return await asyncio.to_thread(input, "Friday> ")
+
+    async def run_foreground(prompt: str, *, shown: str, skip_clarify: bool = False) -> None:
+        render_user(shown)
+        if not session:
+            asyncio.create_task(master.turn(prompt, skip_clarify=skip_clarify))
+            return
+        renderer.begin_turn()
+        ui_state["foreground"] = True
+        try:
+            await master.turn(prompt, skip_clarify=skip_clarify)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            console.print("[yellow]turn cancelled[/yellow]")
+        except Exception as exc:
+            console.print(f"[bold red]error[/bold red] {exc}")
+        finally:
+            ui_state["foreground"] = False
+            renderer.finish()
+            store.save(master.history, current_mode)
 
     try:
         if patch_ctx:
@@ -329,27 +429,58 @@ async def run_cli(root: Path) -> None:
             line = line.strip()
             if not line:
                 continue
+            if line.startswith("/"):
+                kind, sname, rest = resolve_slash(line, stack.get("skills") or [])
+                if kind == "unknown":
+                    console.print(
+                        f"[yellow]unknown command /{sname}[/yellow]  [dim]/help  /skills[/dim]"
+                    )
+                    continue
+                if kind == "skill":
+                    from brain.skills import find_skill, format_skill_turn
+
+                    skill = find_skill(sname, stack.get("skills") or [])
+                    if skill is None:
+                        console.print(f"[yellow]unknown skill /{sname}[/yellow]")
+                        continue
+                    shown = f"/{skill.name}" + (f" {rest}" if rest else "")
+                    await run_foreground(
+                        format_skill_turn(skill, rest),
+                        shown=shown,
+                        skip_clarify=True,
+                    )
+                    continue
+
             if line in ("/quit", "/exit"):
                 break
             if line == "/help":
                 console.print(HELP)
                 continue
             if line == "/clear":
-                console.clear()
-                render_banner(model=master_model, mode=current_mode)
+                paint_shell()
                 continue
             if line in ("/new", "/reset"):
                 store.save(master.history, current_mode)
                 store.create(current_mode)
                 master.history = []
                 master._awaiting_clarify = False
-                console.print(f"[bold]new session[/bold] [dim]{store.id}[/dim]")
+                paint_shell(notice=f"[bold]new session[/bold]  [dim]{store.id}[/dim]")
                 continue
-            if line == "/sessions" or line == "/resume":
+            if line == "/sessions":
                 render_sessions(store.list(), store.id)
                 continue
-            if line.startswith("/resume "):
-                needle = line.split(None, 1)[1].strip()
+            if line == "/resume" or line.startswith("/resume "):
+                needle = line.split(None, 1)[1].strip() if " " in line else ""
+                if not needle:
+                    rows = store.list()
+                    if not rows:
+                        render_sessions(rows, store.id)
+                        continue
+                    needle = await pick_session(rows, store.id) or ""
+                    if not needle:
+                        render_sessions(rows, store.id)
+                        continue
+                store.save(master.history, current_mode)
                 try:
                     store.load(needle)
                 except (KeyError, OSError, ValueError) as exc:
@@ -358,8 +489,12 @@ async def run_cli(root: Path) -> None:
                 master.history = list(store.history)
                 master._awaiting_clarify = False
                 current_mode = store.mode or current_mode
-                console.print(
-                    f"[bold]resumed[/bold] {store.id}  [dim]{store.title or '(untitled)'} · {len(store.history)} messages[/dim]"
+                paint_shell(
+                    replay=True,
+                    notice=(
+                        f"[bold]resumed[/bold] {store.id}  "
+                        f"[dim]{store.title or '(untitled)'} · {len(store.history)} messages[/dim]"
+                    ),
                 )
                 continue
             if line.startswith("/rename"):
@@ -389,7 +524,7 @@ async def run_cli(root: Path) -> None:
                 else:
                     show_mode_dialog(current_mode)
                 continue
-            if line == "/skills":
+            if line in ("/skills", "/skill"):
                 show_skills_dialog(root)
                 continue
             if line == "/plugins" or line == "/tools":
@@ -486,22 +621,7 @@ async def run_cli(root: Path) -> None:
                 console.print(f"[bold green]task {t.id} queued[/bold green] {title}")
                 continue
 
-            render_user(line)
-            if not session:
-                asyncio.create_task(master.turn(line))
-                continue
-            renderer.begin_turn()
-            ui_state["foreground"] = True
-            try:
-                await master.turn(line)
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                console.print("[yellow]turn cancelled[/yellow]")
-            except Exception as exc:
-                console.print(f"[bold red]error[/bold red] {exc}")
-            finally:
-                ui_state["foreground"] = False
-                renderer.finish()
-                store.save(master.history, current_mode)
+            await run_foreground(line, shown=line)
     finally:
         if patch_ctx:
             patch_ctx.__exit__(None, None, None)

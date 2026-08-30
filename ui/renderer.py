@@ -9,6 +9,8 @@ from rich.console import Console, Group
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.rule import Rule
+from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
@@ -27,6 +29,12 @@ FRIDAY_THEME = Theme(
         "banner": "bold cyan",
         "you": "bold blue",
         "footer": "dim",
+        "spinner": "bold cyan",
+        "tool_ok": "bold green",
+        "tool_run": "bold yellow",
+        "tool_fail": "bold red",
+        "gutter": "dim cyan",
+        "rule": "dim",
     }
 )
 
@@ -42,6 +50,17 @@ TOOL_HINT = {
     "kb_read": "kb",
     "kb_consolidate": "kb",
     "spawn_task": "task",
+}
+
+TOOL_ICON = {
+    "shell": "⚡",
+    "files": "📄",
+    "browser": "🌐",
+    "computer": "🖥",
+    "kb_propose": "📝",
+    "kb_read": "📖",
+    "kb_consolidate": "📚",
+    "spawn_task": "🚀",
 }
 
 
@@ -78,7 +97,19 @@ def _short_args(args: dict[str, Any], width: int = 56) -> str:
 
 
 def _tool_heading(name: str, args: dict[str, Any], ring: int, suffix: str = "") -> Text:
+    icon = TOOL_ICON.get(name, "⚙")
+    # Determine status icon and style from suffix
+    if suffix.startswith("done"):
+        status_icon = "✓"
+        status_style = "tool_ok"
+    elif suffix == "running":
+        status_icon = "⏳"
+        status_style = "tool_run"
+    else:
+        status_icon = "›"
+        status_style = "dim"
     line = Text("  ")
+    line.append(f"{icon} ", style=status_style)
     line.append(TOOL_HINT.get(name, "fn"), style="tool")
     line.append("  ")
     line.append(name, style="bold")
@@ -90,20 +121,83 @@ def _tool_heading(name: str, args: dict[str, Any], ring: int, suffix: str = "") 
     line.append_text(Text.from_markup(_ring_label(ring)))
     if suffix:
         line.append("  ")
-        line.append(suffix, style="dim")
+        line.append(f"{status_icon} {suffix}", style=status_style)
     return line
 
 
-def render_banner(model: str = "claude-3-7-sonnet", mode: str = "Code") -> None:
+def _gutter_preview(text: str, width: int = 72) -> Text:
+    """Format a tool result preview with a left-border gutter."""
+    preview = " ".join(text.split())
+    if len(preview) > width:
+        preview = preview[: width - 1] + "…"
+    line = Text("    │ ", style="gutter")
+    line.append(preview, style="dim")
+    return line
+
+
+def render_banner(
+    model: str = "claude-3-7-sonnet",
+    mode: str = "Code",
+    *,
+    cwd: str = "",
+    branch: str = "",
+    session_id: str = "",
+    title: str = "",
+    out: Console | None = None,
+) -> None:
+    c = out or console
     grid = Table.grid(expand=True)
     grid.add_column(justify="left", ratio=1)
     grid.add_column(justify="right", ratio=1)
-    grid.add_row(
-        "[bold cyan]Friday[/bold cyan] [dim]AgentOS[/dim]",
-        f"[dim]{model}[/dim]  [green]{mode}[/green]",
-    )
-    console.print(Panel(grid, border_style="cyan", padding=(0, 1)))
-    console.print("[dim]/new  /resume  /help  ·  type / for commands[/dim]\n")
+    left = Text()
+    left.append("Friday", style="bold cyan")
+    left.append("  AgentOS", style="dim")
+    if cwd:
+        left.append("  ")
+        left.append(cwd, style="bold white")
+    if branch:
+        left.append("  ")
+        left.append(branch, style="green")
+    right = f"[dim]{model}[/dim]  [green]{mode}[/green]"
+    grid.add_row(left, right)
+    meta = Text()
+    if session_id:
+        meta.append("session ", style="dim")
+        meta.append(session_id, style="bold")
+    if title:
+        if session_id:
+            meta.append("  ·  ", style="dim")
+        meta.append(title, style="dim")
+    body: Any = Group(grid, meta) if meta.plain else grid
+    c.print(Panel(body, border_style="cyan", padding=(0, 1)))
+    c.print("[dim]/new  /resume  /exit  /help  ·  type / for commands and skills[/dim]\n")
+
+
+def display_user_content(content: str) -> str:
+    """Collapse a stored skill turn back to `/name args` for the transcript."""
+    if not content.startswith("[skill:"):
+        return content
+    first, _, _rest = content.partition("\n")
+    name = first[len("[skill:") :].rstrip("]")
+    marker = "User request:"
+    idx = content.rfind(marker)
+    request = content[idx + len(marker) :].strip() if idx != -1 else ""
+    if not request or request == "Follow the skill instructions.":
+        return f"/{name}"
+    return f"/{name} {request}"
+
+
+def render_history(history: list[dict[str, Any]], out: Console | None = None) -> None:
+    c = out or console
+    for msg in history:
+        role = msg.get("role")
+        content = str(msg.get("content") or "")
+        if role == "user":
+            render_user(display_user_content(content), out=c)
+        elif role == "assistant" and content.strip():
+            c.print("[banner]friday[/banner]")
+            c.print(Markdown(content))
+            c.print()
 
 
 def render_user(text: str, out: Console | None = None) -> None:
@@ -240,7 +334,7 @@ def render_sessions(rows: list[dict[str, Any]], current_id: str = "") -> None:
             str(row.get("title") or "(untitled)"),
         )
     console.print(table)
-    console.print("[dim]/resume <id> to continue · /new for a blank conversation[/dim]")
+    console.print("[dim]/resume to pick one · /resume <id> to load · /new for a blank conversation[/dim]")
 
 
 class TurnRenderer:
@@ -261,6 +355,7 @@ class TurnRenderer:
         self._think_announced = False
         self._open_tools: list[dict[str, Any]] = []
         self._tag_rest = ""
+        self._pending_block = ""
 
     def begin_turn(self) -> None:
         self.finish()
@@ -269,6 +364,7 @@ class TurnRenderer:
         self._think_started = self.start_time
         self.streamed_text = ""
         self.think_buffer = ""
+        self._pending_block = ""
         self._in_tag = False
         self.tool_count = 0
         self.card_count = 0
@@ -289,7 +385,6 @@ class TurnRenderer:
         for kind, piece in self._split_think(token):
             if kind == "think":
                 if self._live_kind != "think" and not self.think_buffer:
-                    self._flush_answer()
                     if not self._think_started:
                         self._think_started = time.time()
                     self._open_think()
@@ -299,13 +394,23 @@ class TurnRenderer:
                 if self.think_buffer or self._live_kind == "think":
                     self._close_think()
                 self.streamed_text += piece
-                self._paint_answer()
+                self._pending_block += piece
+                blocks, self._pending_block = _extract_completed_blocks(self._pending_block)
+                if blocks:
+                    self._stop_live()
+                    for b in blocks:
+                        self.console.print(Markdown(b))
+                if self._pending_block.strip():
+                    self._paint_draft(self._pending_block)
 
     def on_tool_call(self, tool_name: str, args: dict[str, Any], ring: int = 1) -> None:
         if not self._active:
             self.begin_turn()
         self._close_think()
-        self._flush_answer()
+        self._stop_live()
+        if self._pending_block.strip():
+            self.console.print(Markdown(self._pending_block.strip()))
+            self._pending_block = ""
         self.tool_count += 1
         self._open_tools.append({"name": tool_name, "args": args, "ring": ring, "t0": time.time()})
         self.console.print(_tool_heading(tool_name, args, ring, "running"))
@@ -317,12 +422,10 @@ class TurnRenderer:
             started["done"] = True
         ring = int(started["ring"]) if started else 1
         args = started["args"] if started else {}
-        preview = " ".join((result or "").split())
-        if len(preview) > 72:
-            preview = preview[:71] + "…"
         self.console.print(_tool_heading(name, args, ring, f"done {fmt_duration(elapsed)}"))
+        preview = " ".join((result or "").split())
         if preview:
-            self.console.print(f"    [dim]{preview}[/dim]")
+            self.console.print(_gutter_preview(preview))
 
     def on_card(self) -> None:
         self.card_count += 1
@@ -344,13 +447,17 @@ class TurnRenderer:
             self._stop_live()
             return
         self._close_think()
-        self._flush_answer()
+        self._stop_live()
+        if self._pending_block.strip():
+            self.console.print(Markdown(self._pending_block.strip()))
+            self._pending_block = ""
         elapsed = time.time() - (self.start_time or time.time())
         bits = [fmt_duration(elapsed)]
         if self.tool_count:
             bits.append(f"{self.tool_count} tool" + ("s" if self.tool_count != 1 else ""))
         if self.card_count:
             bits.append(f"{self.card_count} card" + ("s" if self.card_count != 1 else ""))
+        self.console.print(Rule(style="rule"))
         self.console.print(f"[footer]{' · '.join(bits)}[/footer]")
         self.console.print()
         self._active = False
@@ -358,6 +465,7 @@ class TurnRenderer:
         self.think_buffer = ""
         self._in_tag = False
         self._tag_rest = ""
+        self._pending_block = ""
 
     def _split_think(self, token: str) -> list[tuple[str, str]]:
         data = self._tag_rest + token
@@ -413,36 +521,31 @@ class TurnRenderer:
         if think_live:
             self._stop_live()
         if had:
-            self.console.print(f"[thought]thought {fmt_duration(elapsed)}[/thought]")
+            self.console.print(f"[thought]💭 thought {fmt_duration(elapsed)}[/thought]")
         self.think_buffer = ""
         self._think_started = 0.0
         self._think_announced = False
 
     def _think_renderable(self) -> Group:
-        title = Text("thinking", style="thought")
-        body = Text(self.think_buffer[-1200:] if self.think_buffer else "…", style="thought")
-        return Group(title, body)
+        elapsed = time.time() - (self._think_started or self.start_time or time.time())
+        header = Text()
+        header.append("⠋ ", style="spinner")
+        header.append(f"thinking {fmt_duration(elapsed)}", style="thought")
+        # Show last ~4 lines of think buffer for context
+        tail = self.think_buffer[-600:] if self.think_buffer else "…"
+        lines = tail.split("\n")
+        if len(lines) > 4:
+            lines = lines[-4:]
+        body = Text("\n".join(lines), style="thought")
+        return Group(header, body)
 
-    def _paint_answer(self) -> None:
-        md = Markdown(self.streamed_text or "…")
-        if self._live_kind == "answer" and self._live:
+    def _paint_draft(self, text: str) -> None:
+        md = Markdown(text)
+        if self._live_kind == "draft" and self._live:
             self._live.update(md)
             return
-        if self._start_live(md, kind="answer", transient=False):
+        if self._start_live(md, kind="draft", transient=True):
             return
-
-    def _flush_answer(self) -> None:
-        text = self.streamed_text.rstrip()
-        if self._live_kind == "answer":
-            if text and self._live:
-                self._live.update(Markdown(text))
-            self._stop_live()
-            self.streamed_text = ""
-            return
-        if text:
-            self.console.print()
-            self.console.print(Markdown(text))
-        self.streamed_text = ""
 
     def _start_live(self, renderable: Any, *, kind: str, transient: bool) -> bool:
         if not self.console.is_terminal:
@@ -454,7 +557,7 @@ class TurnRenderer:
                 console=self.console,
                 refresh_per_second=8,
                 transient=transient,
-                vertical_overflow="visible",
+                vertical_overflow="crop",
             )
             self._live.start()
             self._live_kind = kind
@@ -472,6 +575,50 @@ class TurnRenderer:
                 pass
             self._live = None
         self._live_kind = ""
+
+
+def _extract_completed_blocks(buffer: str) -> tuple[list[str], str]:
+    """Split buffer into completed Markdown blocks (paragraphs, headers, code blocks)
+    and any incomplete trailing text."""
+    blocks: list[str] = []
+    rest = buffer
+    while rest:
+        # Check if we are inside a code block
+        if rest.startswith("```"):
+            end_cb = rest.find("\n```", 3)
+            if end_cb != -1:
+                after = rest.find("\n", end_cb + 4)
+                if after != -1:
+                    blocks.append(rest[:after].strip())
+                    rest = rest[after + 1:].lstrip("\n")
+                    continue
+                else:
+                    tail = rest[end_cb + 4:]
+                    if not tail.strip():
+                        blocks.append(rest.strip())
+                        rest = ""
+                        break
+            break
+
+        # Check for paragraph boundary \n\n
+        idx = rest.find("\n\n")
+        if idx != -1:
+            code_start = rest.find("```")
+            if code_start != -1 and code_start < idx:
+                prefix = rest[:code_start].strip()
+                if prefix:
+                    blocks.append(prefix)
+                rest = rest[code_start:]
+                continue
+            block = rest[:idx].strip()
+            if block:
+                blocks.append(block)
+            rest = rest[idx + 2:].lstrip("\n")
+            continue
+
+        break
+
+    return blocks, rest
 
 
 def _hold_partial_tag(data: str, tag: str) -> tuple[str, str]:
