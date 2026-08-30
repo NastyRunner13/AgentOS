@@ -15,6 +15,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "/mode": "Switch agent mode (Code, Architect, Ask, Fast)",
     "/provider": "Select LLM provider & default model",
     "/skills": "Browse available agent skills & procedures",
+    "/skill": "Run a skill: /skill <name> [args] (also /<name>)",
     "/plugins": "View active tool specs & integrations",
     "/settings": "Adjust runtime parameters (clarify, max steps, slots)",
     "/facts": "View confirmed long-term memory facts",
@@ -30,8 +31,78 @@ SLASH_COMMANDS: dict[str, str] = {
     "/reload": "Hot-reload config/*.yaml without restart",
     "/clear": "Clear the terminal screen",
     "/help": "Show list of commands and keyboard shortcuts",
-    "/quit": "Exit Friday",
+    "/exit": "Stop the CLI",
+    "/quit": "Alias for /exit",
 }
+
+BUILTIN_COMMANDS = {
+    "new",
+    "reset",
+    "resume",
+    "sessions",
+    "rename",
+    "mode",
+    "provider",
+    "providers",
+    "skills",
+    "skill",
+    "plugins",
+    "tools",
+    "settings",
+    "facts",
+    "proposals",
+    "consolidate",
+    "task",
+    "steer",
+    "tasks",
+    "approve",
+    "deny",
+    "roles",
+    "reload",
+    "clear",
+    "help",
+    "quit",
+    "exit",
+}
+
+
+def resolve_slash(line: str, skills: list | None = None) -> tuple[str, str, str]:
+    """Classify a line: ('text'|'command'|'skill'|'unknown', name, rest)."""
+    if not line.startswith("/"):
+        return ("text", "", line)
+    name, _, rest = line[1:].partition(" ")
+    rest = rest.strip()
+    name_l = name.lower()
+    skills = skills or []
+
+    from brain.skills import find_skill
+
+    if name_l.startswith("skill:"):
+        found = find_skill(name.split(":", 1)[1], skills)
+        if found and found.user_invocable:
+            return ("skill", found.name, rest)
+        return ("unknown", name, rest)
+    if name_l == "skill":
+        sk, _, sk_rest = rest.partition(" ")
+        if not sk:
+            return ("command", "skills", "")
+        found = find_skill(sk, skills)
+        if found and found.user_invocable:
+            return ("skill", found.name, sk_rest.strip())
+        return ("unknown", sk, sk_rest.strip())
+    if name_l in BUILTIN_COMMANDS:
+        return ("command", name_l, rest)
+    found = find_skill(name, skills)
+    if found and found.user_invocable:
+        return ("skill", found.name, rest)
+    return ("unknown", name, rest)
+
+
+def _skill_slash_name(skill, builtins: set[str]) -> str:
+    token = str(getattr(skill, "name", "") or "")
+    if token.lower() in builtins:
+        return f"/skill:{token}"
+    return f"/{token}"
 
 _MODE_NAMES = ("Code", "Architect", "Ask", "Fast")
 
@@ -135,6 +206,21 @@ class FridayCommandCompleter(Completer):
                             )
                     return
 
+                if cmd == "/skill":
+                    for skill in stack.get("skills") or []:
+                        if not getattr(skill, "user_invocable", True):
+                            continue
+                        sname = str(getattr(skill, "name", "") or "")
+                        desc = str(getattr(skill, "description", "") or "")
+                        if sname.lower().startswith(arg_prefix.lower()) or arg_prefix.lower() in sname.lower():
+                            yield Completion(
+                                sname,
+                                start_position=-len(arg_prefix),
+                                display=sname,
+                                display_meta=(desc[:40] or "skill"),
+                            )
+                    return
+
             # Complete the root command
             word = text
             for command, desc in SLASH_COMMANDS.items():
@@ -145,3 +231,20 @@ class FridayCommandCompleter(Completer):
                         display=command,
                         display_meta=desc,
                     )
+            if self.stack_getter and " " not in text:
+                try:
+                    skills = (self.stack_getter() or {}).get("skills") or []
+                except Exception:
+                    skills = []
+                for skill in skills:
+                    if not getattr(skill, "user_invocable", True):
+                        continue
+                    command = _skill_slash_name(skill, BUILTIN_COMMANDS)
+                    if command.startswith(word):
+                        desc = str(getattr(skill, "description", "") or "")
+                        yield Completion(
+                            command,
+                            start_position=-len(word),
+                            display=command,
+                            display_meta=f"skill · {desc[:40]}" if desc else "skill",
+                        )

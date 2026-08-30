@@ -6,7 +6,7 @@ from typing import Any, Optional
 from rich.panel import Panel
 from rich.table import Table
 from tools.specs import SPECS
-from ui.renderer import console
+from ui.renderer import console, render_sessions
 
 MODES = {
     "Code": "Full coding autonomy with shell, file edits, and test verification.",
@@ -14,6 +14,33 @@ MODES = {
     "Ask": "Q&A and explanation mode: read-only tools, no host execution.",
     "Fast": "Uses fast/cheap models for quick one-off answers and edits.",
 }
+
+
+async def pick_session(rows: list[dict[str, Any]], current_id: str = "") -> str | None:
+    """Interactive session picker. Esc / cancel returns None."""
+    if not rows:
+        return None
+    try:
+        from prompt_toolkit.shortcuts import radiolist_dialog
+    except Exception:
+        render_sessions(rows, current_id)
+        return None
+    values = []
+    for row in rows:
+        sid = str(row.get("id", ""))
+        title = str(row.get("title") or "(untitled)")
+        updated = str(row.get("updated_at") or "")[:16].replace("T", " ")
+        mark = "● " if sid == current_id else "  "
+        values.append((sid, f"{mark}{sid}  {updated}  {title}"))
+    try:
+        return await radiolist_dialog(
+            title="Resume session",
+            text="Select a conversation. Esc cancels.",
+            values=values,
+        ).run_async()
+    except Exception:
+        render_sessions(rows, current_id)
+        return None
 
 
 def show_mode_dialog(current_mode: str = "Code") -> str:
@@ -78,7 +105,10 @@ def show_skills_dialog(root_path: Any = None) -> None:
 
     console.print(table)
     global_dir_str = (Path.home() / ".agents" / "skills").as_posix()
-    console.print(f"[dim]Skills loaded from [bold white]{global_dir_str}[/bold white] and [bold white]skills/<name>/SKILL.md[/bold white].[/dim]")
+    console.print(
+        f"[dim]Run with [bold white]/<name>[/bold white] or [bold white]/skill <name>[/bold white]. "
+        f"Loaded from [bold white]{global_dir_str}[/bold white] and [bold white]skills/<name>/SKILL.md[/bold white].[/dim]"
+    )
 
 
 def show_plugins_dialog() -> None:
