@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from orb.shader import agent_state
+
 PHASES = frozenset(
     {"hidden", "idle", "waking", "listening", "thinking", "speaking", "stuck"}
 )
@@ -19,6 +21,7 @@ class Presence:
     def snapshot(self) -> dict:
         return {
             "phase": self.phase,
+            "agent_state": agent_state(self.phase),
             "rms": self.rms,
             "mic_rms": self.mic_rms,
             "card": self.card,

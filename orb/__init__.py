@@ -2,8 +2,9 @@
 
 from orb.draw import render_frame
 from orb.presence import Presence
+from orb.shader import agent_state
 
-__all__ = ["Presence", "Overlay", "render_frame"]
+__all__ = ["Presence", "Overlay", "render_frame", "agent_state"]
 
 
 def __getattr__(name: str):

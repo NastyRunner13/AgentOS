@@ -1,21 +1,20 @@
-"""Frameless always-on-top voice bar. Subscribes via Presence; never opens a mic."""
+"""Frameless always-on-top orb. Subscribes via Presence; never opens a mic."""
 
 from __future__ import annotations
 
-import math
 import queue
 import re
 import sys
 import threading
 import time
-from collections import deque
+import traceback
+from pathlib import Path
 from typing import Callable
 
 from orb.draw import render_frame
 from orb.presence import Presence
 
 KEY = "#010203"
-BARS = 36
 
 
 def parse_tk_origin(geo: str) -> tuple[int, int]:
@@ -39,23 +38,35 @@ def _work_area() -> tuple[int, int, int, int] | None:
     return rect.left, rect.top, rect.right, rect.bottom
 
 
+def _origin(size: int) -> tuple[int, int]:
+    wa = _work_area()
+    if wa:
+        left, _top, right, bottom = wa
+        return (left + right - size) // 2, bottom - size - 10
+    return 200, 200
+
+
 class Overlay:
     def __init__(
         self,
         *,
-        width: int = 320,
-        height: int = 56,
+        width: int | None = None,
+        height: int | None = None,
         size: int | None = None,
         on_toggle: Callable[[], None] | None = None,
         on_mute: Callable[[], None] | None = None,
         on_sleep: Callable[[], None] | None = None,
         on_close: Callable[[], None] | None = None,
     ) -> None:
-        if size is not None:
-            height = max(44, int(size))
-            width = max(width, height * 5)
-        self.width = max(200, int(width))
-        self.height = max(44, int(height))
+        if size is None:
+            w, h = int(width or 0), int(height or 0)
+            if w >= 200 and 0 < h <= 80:
+                size = 140
+            else:
+                size = max(w, h, 140)
+        self.size = max(80, int(size))
+        self.width = self.size
+        self.height = self.size
         self._on_toggle = on_toggle
         self._on_mute = on_mute
         self._on_sleep = on_sleep
@@ -70,7 +81,7 @@ class Overlay:
         self._t0 = time.perf_counter()
         self._press = None
         self._dragged = False
-        self._wave: deque[float] = deque([0.05] * BARS, maxlen=BARS)
+        self._backend = "tk"
 
     def start(self, loop) -> bool:
         try:
@@ -79,9 +90,21 @@ class Overlay:
             return False
         self._loop = loop
         self._stop.clear()
-        self._thread = threading.Thread(target=self._mainloop, name="voice-bar", daemon=True)
+        self._backend = "tk"
+        self._thread = threading.Thread(target=self._run, name="voice-orb", daemon=True)
         self._thread.start()
         return True
+
+    def _run(self) -> None:
+        try:
+            self._tk_loop()
+        except Exception:
+            log = Path.cwd() / "data" / "orb-crash.log"
+            try:
+                log.parent.mkdir(parents=True, exist_ok=True)
+                log.write_text(traceback.format_exc(), encoding="utf-8")
+            except OSError:
+                pass
 
     def push(self, presence: Presence) -> None:
         self._q.put(presence.snapshot())
@@ -108,7 +131,7 @@ class Overlay:
         else:
             cb()
 
-    def _mainloop(self) -> None:
+    def _tk_loop(self) -> None:
         import tkinter as tk
         from PIL import ImageTk
 
@@ -122,17 +145,8 @@ class Overlay:
         except tk.TclError:
             pass
         root.configure(bg=KEY)
-        w, h = self.width, self.height
-        sw = root.winfo_screenwidth()
-        sh = root.winfo_screenheight()
-        wa = _work_area()
-        if wa:
-            left, _top, right, bottom = wa
-            x = (left + right - w) // 2
-            y = bottom - h - 10
-        else:
-            x = (sw - w) // 2
-            y = sh - h - 56
+        w = h = self.size
+        x, y = _origin(w)
         root.geometry(f"{w}x{h}+{x}+{y}")
 
         label = tk.Label(root, bg=KEY, bd=0, highlightthickness=0)
@@ -167,7 +181,7 @@ class Overlay:
             m.add_command(label="Unmute mic" if muted else "Mute mic", command=lambda: self._fire(self._on_mute))
             m.add_command(label="Sleep", command=lambda: self._fire(self._on_sleep))
             m.add_separator()
-            m.add_command(label="Close bar", command=lambda: self._fire(self._on_close))
+            m.add_command(label="Close orb", command=lambda: self._fire(self._on_close))
             try:
                 m.tk_popup(_e.x_root, _e.y_root)
             finally:
@@ -178,8 +192,6 @@ class Overlay:
             widget.bind("<B1-Motion>", on_move)
             widget.bind("<ButtonRelease-1>", on_up)
             widget.bind("<Button-3>", menu)
-
-        last = [time.perf_counter()]
 
         def tick():
             if self._stop.is_set():
@@ -208,32 +220,14 @@ class Overlay:
                 pass
 
             now = time.perf_counter()
-            last[0] = now
-            phase = self._snap.get("phase") or "idle"
-            rms = float(self._snap.get("rms") or 0)
-            mic = float(self._snap.get("mic_rms") or 0)
-            t = now - self._t0
-            if phase == "listening":
-                level = min(1.0, max(0.06, mic * 4.2))
-            elif phase == "speaking":
-                level = min(1.0, max(0.06, rms * 4.2))
-            elif phase == "thinking":
-                level = 0.14 + 0.1 * abs(math.sin(t * 5))
-            elif phase == "waking":
-                level = 0.22 + 0.18 * abs(math.sin(t * 8))
-            else:
-                level = 0.05
-            self._wave.append(level)
             frame = render_frame(
-                phase=phase,
-                rms=rms,
-                mic_rms=mic,
+                phase=self._snap.get("phase") or "idle",
+                rms=float(self._snap.get("rms") or 0),
+                mic_rms=float(self._snap.get("mic_rms") or 0),
                 card=bool(self._snap.get("card")),
                 muted=bool(self._snap.get("muted")),
-                width=self.width,
-                height=self.height,
-                t=t,
-                wave=tuple(self._wave),
+                size=self.size,
+                t=now - self._t0,
             )
             photo = ImageTk.PhotoImage(frame)
             photo_holder["img"] = photo

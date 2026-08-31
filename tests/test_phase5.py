@@ -1,4 +1,4 @@
-"""Phase 5 slice 1: voice bar is a bus subscriber, never a mic owner."""
+"""Phase 5 slice 1: orb is a bus subscriber, never a mic owner."""
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ from pathlib import Path
 from orb.draw import render_frame
 from orb.overlay import parse_tk_origin
 from orb.presence import Presence
+from orb.shader import agent_state
 
 ROOT = Path(__file__).resolve().parents[1]
+SIZE = 140
 
 
 def test_orb_does_not_own_mic_or_master():
@@ -65,51 +67,84 @@ def test_listening_follows_mic_amplitude():
     assert p.mic_rms == 0.2
 
 
+def test_presence_maps_elevenlabs_agent_state():
+    p = Presence()
+    assert p.snapshot()["agent_state"] is None
+    p.on_state({"phase": "listening"})
+    assert p.snapshot()["agent_state"] == "listening"
+    p.on_state({"phase": "thinking"})
+    assert p.snapshot()["agent_state"] == "thinking"
+    p.on_state({"phase": "speaking"})
+    assert agent_state(p.phase) == "talking"
+    p.on_state({"phase": "waking"})
+    assert agent_state("waking") == "listening"
+    p.on_state({"phase": "stuck"})
+    assert agent_state("stuck") == "thinking"
+
+
+def test_orb_html_ships_elevenlabs_states():
+    html = (ROOT / "orb" / "orb.html").read_text(encoding="utf-8")
+    assert "setOrb" in html
+    assert "listening" in html
+    assert "talking" in html
+    assert "thinking" in html
+    assert "ui.elevenlabs.io/docs/components/orb" in html
+
+
 def test_draw_all_phases_render():
     for phase in ("idle", "waking", "listening", "thinking", "speaking", "stuck"):
-        img = render_frame(phase=phase, rms=0.3, mic_rms=0.2, card=False, width=200, height=40, t=1.0)
-        assert img.size == (200, 40)
+        img = render_frame(phase=phase, rms=0.3, mic_rms=0.2, card=False, size=SIZE, t=1.0)
+        assert img.size == (SIZE, SIZE)
 
 
-def test_draw_button_is_opaque_corners_clear():
-    img = render_frame(phase="idle", width=320, height=56)
-    r = (56 - 16) / 2
-    cx = int(2 + 8 + r)
-    cy = 28
-    px = img.getpixel((cx, cy))
+def test_draw_center_opaque_corners_clear():
+    img = render_frame(phase="idle", size=SIZE, t=1.0)
+    px = img.getpixel((SIZE // 2, SIZE // 2))
     assert px[3] > 200
     corner = img.getpixel((0, 0))
     assert corner[3] == 0
 
 
-def test_draw_card_tints_button_amber():
-    img = render_frame(phase="idle", card=True, width=320, height=56)
-    r = (56 - 16) / 2
-    cx = int(2 + 8 + r)
-    px = img.getpixel((cx - int(r) + 3, 28))
-    assert px[0] > px[2]
+def test_draw_card_tints_orb_amber():
+    plain = render_frame(phase="idle", card=False, size=SIZE, t=1.0)
+    tinted = render_frame(phase="idle", card=True, size=SIZE, t=1.0)
+
+    def red_minus_blue(img):
+        total = 0
+        n = 0
+        for x in range(0, SIZE, 8):
+            for y in range(0, SIZE, 8):
+                r, _g, b, a = img.getpixel((x, y))
+                if a > 200:
+                    total += r - b
+                    n += 1
+        return total / max(n, 1)
+
+    assert red_minus_blue(tinted) > red_minus_blue(plain)
 
 
-def test_draw_muted_marks_the_button():
-    live = render_frame(phase="idle", width=320, height=56, muted=False)
-    mute = render_frame(phase="idle", width=320, height=56, muted=True)
+def test_draw_muted_marks_the_orb():
+    live = render_frame(phase="idle", size=SIZE, muted=False, t=1.0)
+    mute = render_frame(phase="idle", size=SIZE, muted=True, t=1.0)
     assert live.tobytes() != mute.tobytes()
 
 
-def test_draw_listening_waveform_moves():
-    idle = render_frame(phase="idle", width=320, height=56, wave=[0.05] * 36)
-    live = render_frame(phase="listening", mic_rms=0.4, width=320, height=56, wave=[0.7] * 36)
+def test_draw_listening_differs_from_idle():
+    idle = render_frame(phase="idle", size=SIZE, t=1.0)
+    live = render_frame(phase="listening", mic_rms=0.4, size=SIZE, t=1.0)
     assert live.tobytes() != idle.tobytes()
-    # waveform lives to the right of the mic button
-    idle_px = idle.getpixel((180, 28))
-    live_px = live.getpixel((180, 28))
-    assert live_px[3] >= idle_px[3]
 
 
-def test_draw_speaking_waveform_differs_from_listening():
-    listen = render_frame(phase="listening", mic_rms=0.4, width=320, height=56, wave=[0.6] * 36)
-    speak = render_frame(phase="speaking", rms=0.4, width=320, height=56, wave=[0.6] * 36)
+def test_draw_talking_differs_from_listening():
+    listen = render_frame(phase="listening", mic_rms=0.4, size=SIZE, t=1.0)
+    speak = render_frame(phase="speaking", rms=0.4, size=SIZE, t=1.0)
     assert listen.tobytes() != speak.tobytes()
+
+
+def test_draw_thinking_differs_from_idle():
+    idle = render_frame(phase="idle", size=SIZE, t=1.0)
+    think = render_frame(phase="thinking", size=SIZE, t=1.0)
+    assert idle.tobytes() != think.tobytes()
 
 
 def test_parse_tk_origin_handles_signed_coords():
@@ -117,3 +152,9 @@ def test_parse_tk_origin_handles_signed_coords():
     assert parse_tk_origin("320x56+12-40") == (12, -40)
     assert parse_tk_origin("320x56-12+40") == (-12, 40)
     assert parse_tk_origin("320x56+-8-12") == (-8, -12)
+
+
+def test_overlay_does_not_start_webview():
+    src = (ROOT / "orb" / "overlay.py").read_text(encoding="utf-8")
+    assert "webview" not in src
+    assert "_tk_loop" in src
