@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Python 3.11+ desktop agent kernel ("Friday") for Windows. Phases 1–2 are implemented; Phase 3 is memory stage 1 (librarian proposals, confirmed-fact recall).
+Python 3.11+ desktop agent kernel ("Friday") for Windows. Phases 1–2 are implemented; Phase 3 is memory stage 1 (librarian proposals, confirmed-fact recall). Phase 4 voice is the bus contract + push-to-talk (`/listen`) + energy VAD on bar click; always-on wake is not shipped yet. Phase 5 slice 1 is a bus-driven voice bar (`orb/`).
 
 ## Start here
 
@@ -15,13 +15,13 @@ Python 3.11+ desktop agent kernel ("Friday") for Windows. Phases 1–2 are imple
 - Install dev deps: `pip install -e ".[dev]"`
 - Tests (offline, fast): `python -m pytest -q`
 - One test: `python -m pytest tests/test_phase1.py::test_c_ring2_shell_blocks_until_approved`
-- App: `python main.py --cli` — the only entrypoint. `/reload` inside the CLI re-reads `config/*.yaml` without restart.
+- App: `python main.py --cli` — the only entrypoint. `python main.py --cli --voice` starts VoiceIO and the bottom-center voice bar on the same process (`/listen`, hotkey, mic-button click). Real STT/TTS: `pip install -e ".[voice]"`. `/reload` inside the CLI re-reads `config/*.yaml` without restart. `/orb` hides or shows the overlay.
 - No lint/typecheck config exists yet.
 
 ## Reality vs plan
 
-- Existing packages: `kernel/` (bus, tasks, permission gate), `brain/` (registry, master, librarian), `memory/` (SQLite L2 + stage-1 graph/proposals), `tools/` (shell/files/browser/computer/kb_*), `ui/` (CLI renderer, completer, session files), plus `config/` and `tests/`.
-- Directories in ARCHITECTURE.md §11 that are still absent (`voice/`, `mcp/`, `server/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) — don't import or build against them. `ui/` is the CLI surface only.
+- Existing packages: `kernel/` (bus, tasks, permission gate), `brain/` (registry, master, librarian), `memory/` (SQLite L2 + stage-1 graph/proposals), `tools/` (shell/files/browser/computer/kb_*), `voice/` (VoiceIO, YAML engines, no Master import), `orb/` (voice bar overlay; bus subscriber only, no mic), `ui/` (CLI renderer, completer, session files), plus `config/` and `tests/`.
+- Directories in ARCHITECTURE.md §11 that are still absent (`mcp/`, `server/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) — don't import or build against them. `ui/` is the CLI surface only. `orb/` is Phase 5 slice 1 (voice bar), not the Tauri `desktop/` app.
 
 ## Gotchas
 

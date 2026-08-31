@@ -281,14 +281,13 @@ A **loop** that auto-installs skills inherits every injection in their descripti
 ```yaml
 mode: local            # local | cloud | realtime
 wake_word:
-  engine: openwaveword # openWakeWord (free, custom "Hey Friday") | porcupine
+  engine: openwakeword # custom "Hey Friday" ONNX | porcupine | none
 stt:
   local: faster-whisper (small/int8)     # GPU if available
-  cloud: openai-whisper-api | deepgram
+  cloud: groq whisper-large-v3-turbo     # file POST; barge-in stays local
 tts:
-  local: piper (fast CPU voice)
-  cloud: openai-tts | elevenlabs
-realtime:              # mode=realtime bypasses stt/tts entirely
+  local: kokoro-82M (speech) / piper (blips)
+realtime:              # mode=realtime bypasses stt/tts entirely; last
   provider: openai-realtime
 vad: silero            # turn-taking, barge-in support
 ```

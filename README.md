@@ -14,7 +14,7 @@
 One Python kernel process owns an asyncio event bus. A **master** agent clarifies ambiguous requests, wraps risky actions in **cards**, and delegates — while you keep working. Long work runs as background **tasks** you can **steer**.
 
 Phases 1–2 are implemented. Phase 3 is memory stage 1 *(librarian proposals, confirmed-fact recall)*.
-Voice, the Tauri desktop shell, and the phone PWA are specified — not yet built.
+Phase 4 voice is push-to-talk on the existing kernel (`python main.py --cli --voice`). Phase 5 slice 1 is a bottom-center voice bar driven by bus events. The Tauri desktop app and phone PWA come later.
 
 <br/>
 
@@ -40,6 +40,7 @@ copy .env.example .env
 ```bash
 # Run
 python main.py --cli          # Interactive agent session
+python main.py --cli --voice  # Same process: /listen, hotkey, voice bar
 python -m pytest -q            # Run test suite (offline, no keys needed)
 python main.py --eval          # Evaluation harness
 ```
@@ -107,14 +108,16 @@ AgentOS/
 ├── tools/             # shell · files · browser · computer operator
 │
 ├── evals/             # Phase 2 scenario suite & harness
-├── tests/             # Kernel · tools · master · phase 1–3 acceptance tests
+├── voice/             # VoiceIO client (STT/TTS engines, no Master import)
+├── orb/               # Voice bar overlay (bus subscriber, no mic)
+├── tests/             # Kernel · tools · master · phase 1–5 acceptance tests
 │
-├── main.py            # Entrypoint:  --cli  |  --eval
+├── main.py            # Entrypoint:  --cli [--voice]  |  --eval
 └── pyproject.toml     # Package config & dependencies
 ```
 
 > [!NOTE]
-> Directories in ARCHITECTURE.md §11 (`voice/`, `mcp/`, `server/`, `ui/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) are planned but **not yet in the tree**.
+> Directories in ARCHITECTURE.md §11 (`mcp/`, `server/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) are planned but **not yet in the tree**.
 
 ---
 
@@ -159,8 +162,8 @@ graph LR
     P1b["⬜ Phase 1b\nFirst Loop"]
     P2["✅ Phase 2\nReliability Layer"]
     P3["🔨 Phase 3\nMemory Stages"]
-    P4["⬜ Phase 4\nVoice"]
-    P5["⬜ Phase 5\nSurfaces"]
+    P4["🔨 Phase 4\nVoice"]
+    P5["🔨 Phase 5\nSurfaces (voice bar)"]
     P6["⬜ Phase 6\nEarned Autonomy"]
 
     P1 --> P1b
@@ -174,8 +177,8 @@ graph LR
     style P2 fill:#22c55e,stroke:#16a34a,color:#fff
     style P3 fill:#f59e0b,stroke:#d97706,color:#fff
     style P1b fill:#374151,stroke:#6b7280,color:#9ca3af
-    style P4 fill:#374151,stroke:#6b7280,color:#9ca3af
-    style P5 fill:#374151,stroke:#6b7280,color:#9ca3af
+    style P4 fill:#f59e0b,stroke:#d97706,color:#fff
+    style P5 fill:#f59e0b,stroke:#d97706,color:#fff
     style P6 fill:#374151,stroke:#6b7280,color:#9ca3af
 ```
 

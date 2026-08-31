@@ -39,10 +39,12 @@ Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY` (or retarget `config/
 | L2 log, proposals, graph apply | `memory/` (`INSERT` into `facts`/`entities`/`edges` only inside `_apply` in `memory/graph.py`) |
 | Shell, files, browser, computer | `tools/` |
 | CLI renderer, slash menu, session files | `ui/` |
+| Voice engines, PTT, `tts.amplitude` | `voice/`, `config/voice.yaml` |
+| Voice bar overlay (bus subscriber) | `orb/` |
 | Scenario suite | `evals/` |
 | DONE WHEN coverage | `tests/test_phaseN.py` |
 
-Directories named in ARCHITECTURE.md §11 that are still absent (`voice/`, `mcp/`, `server/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) — do not import them. Do not scaffold them as empty packages. `ui/` is the CLI surface (`python main.py --cli`).
+Directories named in ARCHITECTURE.md §11 that are still absent (`mcp/`, `server/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) — do not import them. Do not scaffold them as empty packages. `ui/` is the CLI surface (`python main.py --cli`). `voice/` is Phase 4 and must not import `Master`. `orb/` is Phase 5 slice 1: it subscribes to the bus and never opens a mic.
 
 ## Tests
 
@@ -88,7 +90,7 @@ config: add notepad to the operator allowlist
 test: cover stuck after two failed verifies
 ```
 
-Areas that match the tree: `kernel`, `brain`, `memory`, `tools`, `evals`, `config`, `docs`, `test`. `feat` / `fix` / `docs` / `config` / `test` / `chore` are enough.
+Areas that match the tree: `kernel`, `brain`, `memory`, `tools`, `voice`, `orb`, `evals`, `config`, `docs`, `test`. `feat` / `fix` / `docs` / `config` / `test` / `chore` are enough.
 
 The body says why, and which **DONE WHEN** or PRINCIPLES rule it serves, when that is not obvious from the subject.
 
@@ -107,4 +109,4 @@ A patch is ready when:
 
 ## What this repo is not yet
 
-Phase 1–2 are implemented. Phase 3 is memory stage 1 (librarian proposals, confirmed-fact recall). Phase 1b (first **loop**) is specified, not shipped. Voice, surfaces, MCP, and **earned** autonomy wait on their phase gates. Nothing grants itself **earned** status.
+Phase 1–2 are implemented. Phase 3 is memory stage 1 (librarian proposals, confirmed-fact recall). Phase 1b (first **loop**) is specified, not shipped. Phase 4 voice is the bus contract + `/listen` + energy VAD on bar click; wake-word always-on and Silero barge-in still wait. Phase 5 slice 1 is the Python voice bar; Tauri and phone wait. MCP and **earned** autonomy wait on their phase gates. Nothing grants itself **earned** status.

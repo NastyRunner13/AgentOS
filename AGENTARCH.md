@@ -70,15 +70,31 @@ Stage 1 graph lives in the same SQLite file as L2 (`entities`, `facts`, `edges`,
 
 ### Phase 4 — voice
 
-Local pipeline first: openWakeWord → faster-whisper → Piper, silero VAD, `tts.amplitude` events at ~30fps. Cloud adapters after local works. Realtime mode last.
+Voice is a client of the kernel, not a second brain. STT emits the same user text the CLI already sends to `Master.turn`. TTS consumes assistant text and publishes `tts.amplitude`. Open/close of allowlisted apps is `computer`. Long spoken work uses `spawn_task` so the mic loop stays free. Ring 2–3 still emit a **card**; if the turn came from voice, Friday speaks the **card** and the next utterance `yes` / `no` resolves it (CLI `y`/`n` and `/approve` still work). Do not add a voice-tools API. `voice/` must not import `Master`.
 
-**DONE WHEN:** (a) wake → spoken response measured under the latency budget in `config/voice.yaml`; (b) barge-in cancels playback within one VAD frame; (c) orb receives amplitude events during speech; (d) every component swap is a YAML edit, verified by running twice with different stacks.
+Local cascade first. Cloud STT/TTS adapters after the bus contract works. Realtime mode last. Wake, VAD, and barge-in stay on-device even when STT posts a clip to Groq (file POST, not a barge-in socket). Self-TTS is not barge-in: mute or gate the mic against the playback envelope.
+
+`python main.py --cli` stays the entrypoint. `--voice` or `voice.yaml` `enabled: true` starts `VoiceIO` on the same process. Push-to-talk is `/listen` (Enter stops), the YAML `hotkey`, and orb click (`VoiceIO.toggle_listen`). `/listen <text>` injects a transcript without the mic (debug). Always-on "Hey Friday" is wake-word once `wake_word.engine` is not `none`; it is not a **loop**.
+
+Build order inside this phase (narrow path; a later step does not skip an earlier one):
+
+1. Push-to-talk → STT → `Master.turn` → TTS of the reply. `tts.amplitude` during playback. Cancel API for barge-in. No wake.
+2. Energy VAD ends orb utterances after `vad.stop_secs` of silence. Mic frames drop while TTS plays (self-TTS is not barge-in). Silero VAD + cancel within one VAD frame still open.
+3. openWakeWord always-on with a custom `hey_friday.onnx` (bundled community models are CC BY-NC-SA 4.0; inference is ONNX Runtime on Windows).
+4. Sentence-stream TTS; speak `tool.call` titles as the operator starts.
+5. YAML-swappable cloud STT (Groq) and alternate local STT (Parakeet).
+
+Default local stack: WASAPI shared capture, openWakeWord, energy (then Silero) VAD, faster-whisper (or Parakeet), Kokoro-82M speech, Piper only for latency-critical blips. `roles.fast` must be a low-latency model for trivial spoken turns; the master model stays on hard tool work.
+
+**DONE WHEN:** (a) wake (or, until wake ships, `/listen` / final transcript / bar click) → first spoken PCM under `config/voice.yaml` `latency_budget_ms.wake_to_first_audio`; (b) barge-in cancels playback within one VAD frame (`barge_in_frame_ms`); (c) subscribers receive `tts.amplitude` during speech at about `amplitude_fps` (the voice bar only subscribes; the CLI prints `[speaking]`); (d) every component swap is a YAML edit, verified by running twice with different stacks.
 
 ### Phase 5 — surfaces
 
-Desktop app (Tauri): main window with live action feed + approval inbox; orb overlay with pop/bounce spring states. Phone PWA over Tailscale last — optional early, desktop + voice carries daily use.
+Slice 1 (this tree): Python overlay voice bar in `orb/`. Frameless, always-on-top, bottom-center above the taskbar (`orb.width` x `orb.height`, default 320x56). Mic button on the left; live waveform on the right. Subscribes to `agent.state`, `tts.amplitude`, `mic.amplitude`, `approval.request`, `approval.resolved`. Never opens a capture stream. Click the button, YAML `hotkey`, and `/listen` reach VoiceIO, not the overlay. Right-click: mute mic, sleep (hide and mute), close overlay (CLI keeps running). Listening waveform follows `mic.amplitude`; speaking waveform follows `tts.amplitude`. **Card** pending paints the button amber. Tkinter + Pillow. Tauri main window and phone PWA stay later slices.
 
-**DONE WHEN:** (a) feed shows each tool call within one event-loop tick of execution; (b) orb transitions idle→waking→listening→speaking driven purely by bus events; (c) a **card** raised on kernel appears simultaneously on desktop and phone.
+`python main.py --cli --voice` starts VoiceIO and the bar when `orb.enabled` is true (default). `/orb` hides or shows the overlay.
+
+**DONE WHEN:** slice 1: (b) bar transitions idle→listening→thinking→speaking driven purely by bus events; `orb/` does not import `sounddevice` or `Master`; a **card** paints the button amber until `approval.resolved`. Later: (a) feed shows each tool call within one event-loop tick of execution; (c) a **card** raised on kernel appears simultaneously on desktop and phone.
 
 ### Phase 6 — **earned** autonomy
 
@@ -88,11 +104,11 @@ Each unlocks only when Phase 2's harness shows the numbers: stage-2 auto-consoli
 
 ## Reference
 
-Harness layers (prompt, skill-on-demand, web research) are specified here. The plan that landed them is [HARNESS-PLAN.md](HARNESS-PLAN.md). Voice and desktop stay later clients of the same bus; do not add a second brain.
+Harness layers (prompt, skill-on-demand, web research) are specified here. The plan that landed them is [HARNESS-PLAN.md](HARNESS-PLAN.md). Voice is a client of the same bus; desktop stays Phase 5. Do not add a second brain.
 
 ### Event contracts
 
-Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`, `tool.result`, `approval.request`, `approval.resolved`, `tts.amplitude`, `error`. Task shape: `{id, title, status: queued|running|blocked|waiting_approval|done|failed, progress}`. **Card** payload: `{action_preview, reason, ring, expires_at}`. `agent.state` phases: `thinking` (turn started), `token` (streamed text; model reasoning is wrapped in `<think>`…`</think>` and is not part of the assistant reply), `stuck`, `idle` (turn finished).
+Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`, `tool.result`, `approval.request`, `approval.resolved`, `tts.amplitude`, `mic.amplitude`, `error`. Task shape: `{id, title, status: queued|running|blocked|waiting_approval|done|failed, progress}`. **Card** payload: `{action_preview, reason, ring, expires_at}`. `agent.state` phases: `waking` (wake word), `listening` (capturing an utterance), `thinking` (turn started), `token` (streamed text; model reasoning is wrapped in `<think>`…`</think>` and is not part of the assistant reply), `speaking` (TTS playback), `stuck`, `idle` (turn finished or playback ended). `tts.amplitude` and `mic.amplitude` payload: `{rms, t}` at `config/voice.yaml` `amplitude_fps` (last event of an utterance has `rms` 0).
 
 ### CLI surface
 
@@ -104,7 +120,9 @@ Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`
 
 **Composer.** Input is a framed text box (not a raw `>` prompt). Placeholder `message, @file, or /command`. Enter sends; Ctrl+J inserts a newline (Esc+Enter on non-Windows; on Windows Alt+Enter is the console fullscreen chord). Shift+Tab cycles Code / Architect / Ask / Fast. Ctrl+X opens shortcuts. Ctrl+Q exits (same as `/exit`). `@path` (Tab-complete from the workspace / `--root`) attaches that file's contents to the turn; the transcript keeps the `@path`, the model sees the body. Mentions are relative to the workspace and stay inside approved roots. The box is hidden during a foreground stream and redrawn after `idle` (or an error). On Windows, a focus change that does not alter columns/rows is not treated as a resize — those events used to reprint the inline frame a second time. Background **task** turns still run on the task manager and may print into the transcript while the prompt is idle. `patch_stdout` wraps the whole CLI loop so those prints do not eat the prompt. `/exit` (alias `/quit`) stops the process.
 
-**Cards.** A **card** raised during a foreground turn asks `y` allow / `n` deny inline (the main prompt is not up, so `/approve` would deadlock). `/approve` and `/deny` remain for background **tasks** and for anyone who skipped the inline prompt. Ring 0–1 tools still run silent.
+**Cards.** A **card** raised during a foreground turn asks `y` allow / `n` deny inline (the main prompt is not up, so `/approve` would deadlock). `/approve` and `/deny` remain for background **tasks** and for anyone who skipped the inline prompt. Ring 0–1 tools still run silent. A **card** on a voice-originated turn is also spoken; the next utterance `yes` / `no` resolves it.
+
+**Voice.** `python main.py --cli --voice` (or `voice.yaml` `enabled: true`) starts `VoiceIO` beside the composer and, unless `orb.enabled` is false, the bottom-center voice bar. `/listen` is push-to-talk: record until Enter, STT, then the same foreground `Master.turn` as typed text. `/listen <text>` skips the mic. Bar button click and the YAML hotkey call `VoiceIO.toggle_listen`: record until a second click or energy-VAD silence (`vad.engine: energy`), then the same turn path. A click while TTS plays cancels playback (does not start a new capture). Replies are spoken. Mic frames drop while TTS plays. The bar draws a live waveform from `mic.amplitude` while listening and from `tts.amplitude` while speaking. `[speaking]` prints while `tts.amplitude` is non-zero. Wake-word always-on waits on `wake_word.engine`. `/reload` re-reads `config/voice.yaml`. `/orb` hides or shows the overlay.
 
 **Sessions.** `data/sessions/<id>.json` stores CLI `history` (the same list `Master` uses) plus title, mode, timestamps. L2 is still the audit log; session files are not facts and are never recalled as facts. `/new` (alias `/reset`) writes the current session if it has turns, clears the screen, starts a blank conversation, and reprints the banner with the new session id. `/resume` with no argument opens a picker of recent sessions; `/resume <id>` loads that session. After a load, the CLI clears the screen, reprints the banner, and replays saved `history` so the window shows the past conversation. `/sessions` lists without switching. `/rename <title>` sets the title. Auto-save on `idle`. `/clear` only clears the screen and reprints the banner.
 
@@ -179,11 +197,11 @@ OpenAI-compatible chat fills `tool_call` ids when the model omitted them, and se
 
 `memory.yaml`: `stage` (0/1/2), `recall_limit`, `consolidate_episode_limit`, `max_proposals_per_pass`, `librarian_fail_stuck`. Stage 2 stays locked until the Phase 6 eval unlocks it.
 
+`voice.yaml`: `enabled`, `mode` (`local` | `cloud` | `realtime`), `latency_budget_ms.wake_to_first_audio`, `latency_budget_ms.barge_in_frame_ms`, `wake_word.engine` (`none` | `openwakeword` | `porcupine`), `wake_word.model`, `wake_word.threshold`, `hotkey`, `mic_device`, `stt.engine` (`fake` | `faster-whisper` | `groq` | `parakeet-sherpa`), `stt.model`, `stt.language`, `stt.api_key_env`, `tts.engine` (`fake` | `kokoro` | `piper`), `tts.voice`, `tts.model`, `tts.voices`, `tts.piper_voice`, `vad.engine` (`none` | `energy` | `silero`), `vad.stop_secs`, `vad.threshold`, `turn` (`off` | `smart_turn_v3`), `amplitude_fps`, `sample_rate`, `orb.enabled`, `orb.width`, `orb.height`. Capture is WASAPI shared, never exclusive. A schema change updates this section in the same commit.
+
 ### Later (specified, not this tree)
 
-Voice (Phase 4): STT emits the same user text the CLI already sends to `Master.turn`. TTS consumes assistant text + `tts.amplitude`. Open/close of allowlisted apps is `computer`. Do not add a second voice-tools API.
-
-Desktop (Phase 5): subscribe to existing bus topics (`agent.state`, `tool.call`, `approval.request`, `tts.amplitude`). Cards already have a payload. The CLI is one client; Tauri is another.
+Tauri desktop (later Phase 5): main window + action feed. The Python voice bar in `orb/` is slice 1 (this tree) and already subscribes to `agent.state`, `tool.call`, `approval.request`, `tts.amplitude`, `mic.amplitude`. Cards already have a payload. The CLI is one client; the bar is another; Tauri is a later client. The overlay never owns the mic.
 
 Typed sub-agents: `spawn_task` stays. A later `spawn_subagent(role, prompt)` (depth 1, isolated history, schema `{status, result, artifacts[]}`) waits until `files` can be capability-gated. Not a swarm.
 

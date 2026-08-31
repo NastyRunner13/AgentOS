@@ -1,0 +1,45 @@
+# Voice is I/O on Master.turn. Swap engines here; the kernel does not change.
+# pip install -e ".[voice]" for faster-whisper, Kokoro, WASAPI capture.
+# stt.engine: groq needs GROQ_API_KEY and does not own barge-in.
+
+enabled: false
+mode: local                 # local | cloud | realtime
+
+latency_budget_ms:
+  wake_to_first_audio: 2500
+  barge_in_frame_ms: 32
+
+wake_word:
+  engine: none              # none | openwakeword | porcupine
+  model: models/hey_friday.onnx
+  threshold: 0.5
+
+hotkey: "ctrl+shift+space"
+mic_device: default         # WASAPI shared; pin a device name if Windows picks Communications
+
+stt:
+  engine: faster-whisper    # fake | faster-whisper | groq | parakeet-sherpa
+  model: small.en
+  language: en
+  api_key_env: GROQ_API_KEY
+
+tts:
+  engine: kokoro            # fake | kokoro | piper
+  voice: af_heart
+  model: models/kokoro-v1.0.onnx
+  voices: models/voices-v1.0.bin
+  piper_voice: en_US-lessac-medium
+
+vad:
+  engine: energy            # none | energy | silero
+  stop_secs: 0.6
+  threshold: 0.02           # RMS 0–1; energy VAD voiced floor
+
+turn: off                   # off | smart_turn_v3
+amplitude_fps: 30
+sample_rate: 16000
+
+orb:
+  enabled: true             # overlay when VoiceIO starts; /orb hides
+  width: 320
+  height: 56
