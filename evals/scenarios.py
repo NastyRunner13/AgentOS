@@ -337,14 +337,14 @@ async def research_query_cites_fetch(root: Path) -> ScenarioResult:
     from brain.registry import FakeAdapter, Registry
     from kernel import TaskManager
 
-    async def fake_search(query, perm_cfg, clip=None):
+    async def fake_search(query, perm_cfg, clip=None, **opts):
         return (
             '<untrusted source="web">\n'
-            '[{"title":"Example","url":"https://example.com/x","snippet":"about x"}]\n'
+            '[{"n":1,"title":"Example","url":"https://example.com/x","domain":"example.com","snippet":"about x"}]\n'
             "</untrusted>"
         )
 
-    async def fake_fetch(url, perm_cfg, clip=None):
+    async def fake_fetch(url, perm_cfg, clip=None, **opts):
         return f'<untrusted source="web" url="{url}">\nExample Domain facts about x.\n</untrusted>'
 
     orig_search, orig_fetch = webmod.search, webmod.fetch

@@ -83,6 +83,8 @@ async def test_web_search_returns_untrusted_titles(monkeypatch):
     assert "<untrusted" in raw
     assert "Example Page" in raw
     assert "https://example.com/page" in raw
+    assert '"domain": "example.com"' in raw
+    assert '"n": 1' in raw
 
 
 async def test_web_fetch_wraps_body_and_blocks_localhost(monkeypatch):
@@ -117,14 +119,150 @@ async def test_web_fetch_wraps_body_and_blocks_localhost(monkeypatch):
 async def test_web_tools_dispatch(tmp_path: Path, monkeypatch):
     import tools.web as webmod
 
-    async def fake_search(query, perm_cfg, clip=None):
-        return f'<untrusted source="web">\n{query}\n</untrusted>'
+    async def fake_search(query, perm_cfg, clip=None, **opts):
+        return f'<untrusted source="web">\n{query} site={opts.get("site")}\n</untrusted>'
 
-    async def fake_fetch(url, perm_cfg, clip=None):
-        return f'<untrusted source="web" url="{url}">\nok\n</untrusted>'
+    async def fake_fetch(url, perm_cfg, clip=None, **opts):
+        return f'<untrusted source="web" url="{url}">\nok {opts.get("pattern")}\n</untrusted>'
 
     monkeypatch.setattr(webmod, "search", fake_search)
     monkeypatch.setattr(webmod, "fetch", fake_fetch)
     tools = NativeTools(tmp_path, PERM)
-    assert "needle" in await tools.execute("web_search", {"query": "needle"})
-    assert "ok" in await tools.execute("web_fetch", {"url": "https://example.com"})
+    assert "needle" in await tools.execute("web_search", {"query": "needle", "site": "example.com"})
+    assert "site=example.com" in await tools.execute(
+        "web_search", {"query": "needle", "site": "example.com"}
+    )
+    fetched = await tools.execute(
+        "web_fetch", {"url": "https://example.com", "pattern": "ok"}
+    )
+    assert "ok" in fetched
+    assert "ok ok" in fetched
+
+
+async def test_web_search_block_is_not_no_results(monkeypatch):
+    import tools.web as webmod
+
+    async def fake_http(method, url, *, data=None, headers=None, timeout=20.0):
+        return 200, '<html><body><div class="anomaly-modal__title">robot</div></body></html>', "text/html"
+
+    monkeypatch.setattr(webmod, "_http", fake_http)
+    raw = await webmod.search("example", PERM)
+    assert "blocked" in raw
+    assert "no results" not in raw
+    assert "<untrusted" in raw
+
+
+async def test_web_search_http_202_is_blocked(monkeypatch):
+    import tools.web as webmod
+
+    async def fake_http(method, url, *, data=None, headers=None, timeout=20.0):
+        return 202, "Accepted", "text/html"
+
+    monkeypatch.setattr(webmod, "_http", fake_http)
+    raw = await webmod.search("example", PERM)
+    assert "blocked" in raw
+
+
+async def test_web_search_appends_site(monkeypatch):
+    import tools.web as webmod
+
+    seen = []
+
+    async def fake_http(method, url, *, data=None, headers=None, timeout=20.0):
+        seen.append(data)
+        return 200, DDG_HTML, "text/html"
+
+    monkeypatch.setattr(webmod, "_http", fake_http)
+    await webmod.search("example", PERM, site="docs.python.org")
+    assert seen and "site:docs.python.org" in seen[0]["q"]
+
+
+async def test_web_search_falls_back_to_brave_when_ddg_blocked(monkeypatch):
+    import tools.web as webmod
+
+    monkeypatch.setenv("BRAVE_API_KEY", "secret-brave-key")
+    calls = []
+
+    async def fake_http(method, url, *, data=None, headers=None, timeout=20.0):
+        calls.append(url)
+        if "duckduckgo" in url:
+            return 202, '<div class="anomaly-modal__title">nope</div>', "text/html"
+        return (
+            200,
+            '{"web":{"results":[{"title":"B","url":"https://brave.example/x","description":"from brave"}]}}',
+            "application/json",
+        )
+
+    monkeypatch.setattr(webmod, "_http", fake_http)
+    cfg = {**PERM, "web": {"provider": "duckduckgo", "fallback": "brave"}}
+    raw = await webmod.search("example", cfg)
+    assert "from brave" in raw
+    assert "brave.example" in raw
+    assert any("search.brave.com" in u for u in calls)
+    assert "secret-brave-key" not in raw
+    assert "X-Subscription-Token" not in raw
+
+
+async def test_web_search_fallback_without_key_keeps_block(monkeypatch):
+    import tools.web as webmod
+
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+
+    async def fake_http(method, url, *, data=None, headers=None, timeout=20.0):
+        return 202, '<div class="anomaly-modal__title">nope</div>', "text/html"
+
+    monkeypatch.setattr(webmod, "_http", fake_http)
+    cfg = {**PERM, "web": {"provider": "duckduckgo", "fallback": "brave"}}
+    raw = await webmod.search("example", cfg)
+    assert "blocked" in raw
+    assert "BRAVE_API_KEY" in raw
+
+
+async def test_brave_provider_without_key(monkeypatch):
+    import tools.web as webmod
+
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    cfg = {**PERM, "web": {"provider": "brave"}}
+    raw = await webmod.search("example", cfg)
+    assert "BRAVE_API_KEY" in raw
+
+
+async def test_web_fetch_pattern_and_headings(monkeypatch):
+    import tools.web as webmod
+
+    page = """
+    <html><body>
+    <nav>skip me</nav>
+    <h1>Title One</h1>
+    <p>Hello public.</p>
+    <pre><code>def needle():
+    return 1</code></pre>
+    <p>tail</p>
+    </body></html>
+    """
+
+    async def fake_http(method, url, *, data=None, headers=None, timeout=20.0):
+        return 200, page, "text/html"
+
+    monkeypatch.setattr(webmod, "_http", fake_http)
+    full = await webmod.fetch("https://example.com/page", PERM)
+    assert "# Title One" in full
+    assert "Hello public." in full
+    assert "skip me" not in full
+    sliced = await webmod.fetch("https://example.com/page", PERM, pattern="needle")
+    assert "def needle" in sliced
+    assert "match" in sliced
+    miss = await webmod.fetch("https://example.com/page", PERM, pattern="definitely-absent-zz")
+    assert "no matches" in miss
+
+
+def test_html_to_text_keeps_structure():
+    import tools.web as webmod
+
+    text = webmod.html_to_text(
+        "<html><body><h2>API</h2><ul><li>one</li><li>two</li></ul>"
+        "<script>alert(1)</script></body></html>"
+    )
+    assert "## API" in text
+    assert "- one" in text
+    assert "alert(1)" not in text

@@ -34,12 +34,21 @@ def load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def collect_secrets(models_cfg: dict) -> list[str]:
+def collect_secrets(models_cfg: dict, perm_cfg: dict | None = None) -> list[str]:
     found = []
+    seen: set[str] = set()
+    names: list[str] = []
     for pcfg in (models_cfg.get("providers") or {}).values():
         env = pcfg.get("api_key_env")
-        if env and os.environ.get(env):
-            found.append(os.environ[env])
+        if env:
+            names.append(env)
+    web = (perm_cfg or {}).get("web") or {}
+    names.append(str(web.get("brave_api_key_env") or "BRAVE_API_KEY"))
+    for env in names:
+        val = os.environ.get(env)
+        if val and val not in seen:
+            seen.add(val)
+            found.append(val)
     return found
 
 
@@ -88,7 +97,7 @@ def boot(root: Path):
         clarify_prompt=str(prompts.get("clarify") or ""),
         clarify=bool(kernel_cfg.get("clarify", True)),
         max_tool_steps=int(kernel_cfg.get("max_tool_steps", 16)),
-        secrets=collect_secrets(models_cfg),
+        secrets=collect_secrets(models_cfg, perm_cfg),
         skills=skills,
     )
     return {
@@ -639,7 +648,8 @@ async def run_cli(root: Path) -> None:
                 prompts = stack["registry"].cfg.get("prompts") or {}
                 master.system_prompt = str(prompts.get("master") or master.system_prompt)
                 master.clarify_prompt = str(prompts.get("clarify") or master.clarify_prompt)
-                master.secrets = collect_secrets(stack["registry"].cfg)
+                master.tools.perm_cfg = stack["perm_cfg"]
+                master.secrets = collect_secrets(stack["registry"].cfg, stack["perm_cfg"])
                 mem_path = cfg_dir / "memory.yaml"
                 if mem_path.is_file():
                     stack["memory"].cfg = load_yaml(mem_path)

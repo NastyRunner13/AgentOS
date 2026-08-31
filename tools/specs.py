@@ -42,12 +42,17 @@ SPECS = [
         "function": {
             "name": "web_search",
             "description": (
-                "Search the public web. Returns titles, URLs, and snippets, "
-                "wrapped as untrusted. Use instead of browser for lookup."
+                "Search the public web. Returns numbered hits "
+                "{n, title, url, domain, snippet}, wrapped as untrusted. "
+                "Use instead of browser for lookup. Pass site to restrict to a domain."
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"query": {"type": "string"}},
+                "properties": {
+                    "query": {"type": "string"},
+                    "site": {"type": "string"},
+                    "max_results": {"type": "number"},
+                },
                 "required": ["query"],
             },
         },
@@ -58,11 +63,15 @@ SPECS = [
             "name": "web_fetch",
             "description": (
                 "HTTP GET a public URL and return extracted text, wrapped as untrusted. "
-                "Blocks localhost and private IPs. Use browser for login or clicking."
+                "Blocks localhost and private IPs. Pass pattern to return matching slices. "
+                "Use browser for login or clicking."
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"url": {"type": "string"}},
+                "properties": {
+                    "url": {"type": "string"},
+                    "pattern": {"type": "string"},
+                },
                 "required": ["url"],
             },
         },

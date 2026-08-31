@@ -386,10 +386,10 @@ async def test_web_search_not_browser(tmp_path: Path, monkeypatch):
 
     browser_called = []
 
-    async def fake_search(query, perm_cfg, clip=None):
-        return '<untrusted source="web">\n[{"title":"X","url":"https://example.com/x","snippet":"about x"}]\n</untrusted>'
+    async def fake_search(query, perm_cfg, clip=None, **opts):
+        return '<untrusted source="web">\n[{"n":1,"title":"X","url":"https://example.com/x","domain":"example.com","snippet":"about x"}]\n</untrusted>'
 
-    async def fake_fetch(url, perm_cfg, clip=None):
+    async def fake_fetch(url, perm_cfg, clip=None, **opts):
         return f'<untrusted source="web" url="{url}">\nExample Domain about x.\n</untrusted>'
 
     monkeypatch.setattr(webmod, "search", fake_search)
@@ -470,5 +470,7 @@ def test_openrouter_roles_and_memory_stage():
     for token in ("web_search", "files", "browser", "computer", "skill"):
         assert token in master
     assert "succeeded" in master
+    assert "blocked" in master
+    assert "pattern=" in master
     assert mem["stage"] in (0, 1)
     assert mem["stage"] < 2

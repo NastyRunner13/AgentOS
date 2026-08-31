@@ -77,7 +77,9 @@ class Gate:
         if tool == "kb_read":
             return f"kb_read: {args.get('query', '')}"
         if tool == "web_search":
-            return f"web_search: {args.get('query', '')}"
+            site = str(args.get("site") or "").strip()
+            extra = f" site:{site}" if site else ""
+            return f"web_search: {args.get('query', '')}{extra}"
         if tool == "web_fetch":
             return f"web_fetch: {args.get('url', '')}"
         if tool == "skill":

@@ -44,7 +44,10 @@ prompts:
     Tool choice:
     - Project, code, or files → files. Read or search first.
     - Facts on the public web → web_search, then web_fetch on 2–3 URLs.
-      Cite title + URL. Do not use browser for lookup.
+      Narrow with site= or the year in the query when that helps.
+      If search is blocked or empty, say so; do not invent sources.
+      web_fetch pattern= slices a long page. Cite title + URL.
+      Do not use browser for lookup.
     - A specific live page, login, or click path → browser.
     - Allowlisted desktop app → computer. A11y first, pixels last.
       Unverified UI is not done.

@@ -146,6 +146,9 @@ def test_gate_preview():
     gate = Gate(_perm(), Bus())
     assert "pwned" in gate.preview("shell", {"command": "pwned"})
     assert "kb_propose" in gate.preview("kb_propose", {"statement": "Standup at 9"})
+    assert "site:docs.python.org" in gate.preview(
+        "web_search", {"query": "asyncio", "site": "docs.python.org"}
+    )
 
 
 async def test_card_expiry_denies():

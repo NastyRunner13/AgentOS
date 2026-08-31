@@ -40,9 +40,12 @@ browser:
 web:
   search_ring: 0
   fetch_ring: 0
-  search_max_results: 5
+  search_max_results: 8
   fetch_timeout_seconds: 20
-  user_agent: AgentOS/0.1
+  user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+  provider: duckduckgo
+  fallback: brave
+  brave_api_key_env: BRAVE_API_KEY
 
 operator:
   ring: 1

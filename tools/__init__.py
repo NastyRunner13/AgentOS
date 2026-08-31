@@ -53,11 +53,22 @@ class NativeTools:
         if name == "web_search":
             from tools import web as webmod
 
-            return await webmod.search(str(args.get("query") or ""), self.perm_cfg, clip=self._clip)
+            return await webmod.search(
+                str(args.get("query") or ""),
+                self.perm_cfg,
+                clip=self._clip,
+                site=str(args.get("site") or ""),
+                max_results=args.get("max_results"),
+            )
         if name == "web_fetch":
             from tools import web as webmod
 
-            return await webmod.fetch(str(args.get("url") or ""), self.perm_cfg, clip=self._clip)
+            return await webmod.fetch(
+                str(args.get("url") or ""),
+                self.perm_cfg,
+                clip=self._clip,
+                pattern=str(args.get("pattern") or ""),
+            )
         if name == "computer":
             if self.operator is None:
                 return "operator not configured"

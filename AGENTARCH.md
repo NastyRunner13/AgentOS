@@ -134,8 +134,8 @@ Chat tools and their default rings (`config/permissions.yaml`). Unknown names ar
 | Tool | Ring | Role |
 |---|---|---|
 | `files` read/search | 0 | sandbox inside approved roots |
-| `web_search` | 0 | DuckDuckGo HTML query → `{title, url, snippet}`, wrapped **untrusted** |
-| `web_fetch` | 0 | HTTP GET `http:`/`https:` only; block localhost and private IPs (127/10/172.16–31/192.168); wrapped **untrusted**; truncated to `tool_result_max_chars` |
+| `web_search` | 0 | Query a search provider → numbered `{n, title, url, domain, snippet}`, wrapped **untrusted**. Default provider is DuckDuckGo HTML (no key). Optional args: `site`, `max_results`. A DuckDuckGo interstitial (HTTP 202, `anomaly-modal`) is **blocked**, not empty results; then `web.fallback` runs if configured. |
+| `web_fetch` | 0 | HTTP GET `http:`/`https:` only; block localhost and private IPs (127/10/172.16–31/192.168); HTML extracted to text (headings, lists, code kept); optional `pattern` returns matching slices; wrapped **untrusted**; truncated to `tool_result_max_chars` |
 | `skill` | 0 | return a SKILL.md body by name |
 | `spawn_task` / `kb_read` | 0 | |
 | `files` write / `browser` / `computer` / `kb_propose` / `kb_consolidate` | 1 | |
@@ -171,7 +171,7 @@ Versioned source of truth, one file per concern: `models.yaml`, `voice.yaml`, `p
 
 `models.yaml` `prompts.master` teaches tool choice (files vs `web_search`/`web_fetch` vs `browser` vs `computer` vs `shell` vs `skill`) and forbids claiming success without a tool result. `prompts.clarify` lists the same tools; research asks are **clear**.
 
-`permissions.yaml` `web:` (`search_ring`, `fetch_ring`, `search_max_results`, `fetch_timeout_seconds`, `user_agent`). DuckDuckGo HTML needs no API key.
+`permissions.yaml` `web:` (`search_ring`, `fetch_ring`, `search_max_results`, `fetch_timeout_seconds`, `user_agent`, `provider` (`duckduckgo` default), `fallback` (optional `brave`), `brave_api_key_env`). DuckDuckGo HTML needs no API key. Brave needs `BRAVE_API_KEY` in `.env` (scrubbed). Fallback is a no-op without the key.
 
 `kernel.yaml`: `concurrent_slots`, `max_tool_steps` (chat tool-loop cap, 16), `clarify`, `tool_result_max_chars`, `skills_dir`.
 
