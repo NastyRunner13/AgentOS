@@ -23,6 +23,10 @@ class Gate:
             return int(self.cfg.get("browser", {}).get("ring", 1))
         if tool == "computer":
             return int(self.cfg.get("operator", {}).get("ring", 1))
+        if tool == "web_search":
+            return int(self.cfg.get("web", {}).get("search_ring", 0))
+        if tool == "web_fetch":
+            return int(self.cfg.get("web", {}).get("fetch_ring", 0))
         if tool == "spawn_task":
             return 0
         if tool == "kb_read":
@@ -70,6 +74,10 @@ class Gate:
             return "kb_consolidate"
         if tool == "kb_read":
             return f"kb_read: {args.get('query', '')}"
+        if tool == "web_search":
+            return f"web_search: {args.get('query', '')}"
+        if tool == "web_fetch":
+            return f"web_fetch: {args.get('url', '')}"
         return f"{tool}: {args}"
 
     async def check(self, tool: str, args: dict, reason: str = "") -> bool:

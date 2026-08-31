@@ -4,8 +4,9 @@ from __future__ import annotations
 
 
 class Browser:
-    def __init__(self, perm_cfg: dict) -> None:
+    def __init__(self, perm_cfg: dict, clip=None) -> None:
         self.perm_cfg = perm_cfg
+        self._clip = clip
         self._browser = None
         self._page = None
 
@@ -33,6 +34,8 @@ class Browser:
             return f"navigated {page.url}"
         if action == "snapshot":
             text = await page.locator("body").inner_text()
+            if self._clip:
+                text = self._clip(text)
             return f'<untrusted source="web">\n{text}\n</untrusted>'
         if action == "click":
             await page.locator(str(args.get("ref", "body"))).first.click()

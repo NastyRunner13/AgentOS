@@ -37,6 +37,13 @@ browser:
   ring: 1
   headless: false
 
+web:
+  search_ring: 0
+  fetch_ring: 0
+  search_max_results: 5
+  fetch_timeout_seconds: 20
+  user_agent: AgentOS/0.1
+
 operator:
   ring: 1
   max_verify_failures: 2

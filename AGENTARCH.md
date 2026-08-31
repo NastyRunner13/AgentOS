@@ -88,6 +88,8 @@ Each unlocks only when Phase 2's harness shows the numbers: stage-2 auto-consoli
 
 ## Reference
 
+Harness layers (prompt, skill-on-demand, web research) are specified here. Voice and desktop stay later clients of the same bus; do not add a second brain.
+
 ### Event contracts
 
 Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`, `tool.result`, `approval.request`, `approval.resolved`, `tts.amplitude`, `error`. Task shape: `{id, title, status: queued|running|blocked|waiting_approval|done|failed, progress}`. **Card** payload: `{action_preview, reason, ring, expires_at}`. `agent.state` phases: `thinking` (turn started), `token` (streamed text; model reasoning is wrapped in `<think>`…`</think>` and is not part of the assistant reply), `stuck`, `idle` (turn finished).
@@ -113,7 +115,7 @@ Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`
 `config/kernel.yaml` `clarify` (default true) scores each chat turn with `fast` before master. Prompt: `config/models.yaml` `prompts.clarify`.
 
 - Input: current user text plus the last 3 foreground `history` turns. No tools on the scorer.
-- `unclear` is only a missing user choice that would change the action (which path, which app, which person). Friday already has `files`, `shell`, `browser`, `computer`, and kb tools. An omitted path is the working directory.
+- `unclear` is only a missing user choice that would change the action (which path, which app, which person). Friday already has `files`, `shell`, `browser`, `computer`, `web_search`, `web_fetch`, and kb tools. An omitted path is the working directory. "Look up X" / "research Y" is **clear**.
 - `unclear` asks at most 3 questions, writes them to L2 and `history`, and returns without master. The next foreground user turn skips the scorer and runs master with that `history`.
 - `trivial` appends `[assumption]` and continues to master. `clear` continues.
 - Background **task** turns still score; they neither set nor consume the skip, and they do not receive CLI `history`.
@@ -126,6 +128,21 @@ Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`
 | 1 | app launch, writes in approved roots, browser actions | silent, logged |
 | 2 | shell outside allowlist, installs | **card**, scoped grants allowed |
 | 3 | deletes above threshold, purchases, sends, credentials | explicit confirm, no scope grants |
+
+Chat tools and their default rings (`config/permissions.yaml`). Unknown names are ring 2.
+
+| Tool | Ring | Role |
+|---|---|---|
+| `files` read/search | 0 | sandbox inside approved roots |
+| `web_search` | 0 | DuckDuckGo HTML query → `{title, url, snippet}`, wrapped **untrusted** |
+| `web_fetch` | 0 | HTTP GET `http:`/`https:` only; block localhost and private IPs (127/10/172.16–31/192.168); wrapped **untrusted**; truncated to `tool_result_max_chars` |
+| `spawn_task` / `kb_read` | 0 | |
+| `files` write / `browser` / `computer` / `kb_propose` / `kb_consolidate` | 1 | |
+| `shell` allowlisted | 1 | |
+| `shell` other | 2 | **card** |
+| `files` delete | 2–3 | size threshold |
+
+`config/kernel.yaml` `max_tool_steps` (16) caps chained tool calls per chat turn. It is not a **loop** cap. Browser snapshot text is clipped to `tool_result_max_chars` inside the **untrusted** wrap.
 
 Hardening: **untrusted** content is labeled at ingestion and stripped of tool-trigger power; permission config is the sole authority over execution; secrets exist only in `.env`, scrubbed from context; MCP servers pinned by version; L2 records everything for audit. A **loop** at 3am is an attack surface at 3am: overnight work stays ring 0–1 and produces drafts; ring 2–3 wait on a **card**; loop permissions are re-audited on a 30-day calendar. Full unattended rules: [PRINCIPLES.md](PRINCIPLES.md).
 
@@ -141,4 +158,20 @@ Triggers in trust order: active suggestion after novel multi-step success → ex
 
 Versioned source of truth, one file per concern: `models.yaml`, `voice.yaml`, `permissions.yaml`, `memory.yaml`, `mcp_servers.json`, `voice.yaml` latency budget. Behavior changes ship as config diffs wherever possible; schema changes require updating the matching section here in the same commit.
 
+`models.yaml` `prompts.master` teaches tool choice (files vs `web_search`/`web_fetch` vs `browser` vs `computer` vs `shell`) and forbids claiming success without a tool result. `prompts.clarify` lists the same tools; research asks are **clear**.
+
+`permissions.yaml` `web:` (`search_ring`, `fetch_ring`, `search_max_results`, `fetch_timeout_seconds`, `user_agent`). DuckDuckGo HTML needs no API key.
+
+`kernel.yaml`: `concurrent_slots`, `max_tool_steps` (chat tool-loop cap, 16), `clarify`, `tool_result_max_chars`, `skills_dir`.
+
 `memory.yaml`: `stage` (0/1/2), `recall_limit`, `consolidate_episode_limit`, `max_proposals_per_pass`, `librarian_fail_stuck`. Stage 2 stays locked until the Phase 6 eval unlocks it.
+
+### Later (specified, not this tree)
+
+Voice (Phase 4): STT emits the same user text the CLI already sends to `Master.turn`. TTS consumes assistant text + `tts.amplitude`. Open/close of allowlisted apps is `computer`. Do not add a second voice-tools API.
+
+Desktop (Phase 5): subscribe to existing bus topics (`agent.state`, `tool.call`, `approval.request`, `tts.amplitude`). Cards already have a payload. The CLI is one client; Tauri is another.
+
+Typed sub-agents: `spawn_task` stays. A later `spawn_subagent(role, prompt)` (depth 1, isolated history, schema `{status, result, artifacts[]}`) waits until `files` can be capability-gated. Not a swarm.
+
+Markdown command templates (`$ARGUMENTS`) wait; skills-as-slash is enough. Builtins own `/name`; colliding skills are `/skill:name`.

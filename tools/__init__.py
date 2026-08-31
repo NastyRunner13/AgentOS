@@ -29,7 +29,7 @@ class NativeTools:
         self.perm_cfg = perm_cfg
         self.max_chars = max_chars
         self._shell_runner = shell_runner or powershell
-        self._session = Browser(perm_cfg)
+        self._session = Browser(perm_cfg, clip=self._clip)
         self.operator = operator
 
     @property
@@ -50,6 +50,14 @@ class NativeTools:
             return self.files(args)
         if name == "browser":
             return await self.browser(args)
+        if name == "web_search":
+            from tools import web as webmod
+
+            return await webmod.search(str(args.get("query") or ""), self.perm_cfg, clip=self._clip)
+        if name == "web_fetch":
+            from tools import web as webmod
+
+            return await webmod.fetch(str(args.get("url") or ""), self.perm_cfg, clip=self._clip)
         if name == "computer":
             if self.operator is None:
                 return "operator not configured"

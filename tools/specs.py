@@ -60,6 +60,36 @@ SPECS = [
     {
         "type": "function",
         "function": {
+            "name": "web_search",
+            "description": (
+                "Search the public web. Returns titles, URLs, and snippets, "
+                "wrapped as untrusted. Use instead of browser for lookup."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_fetch",
+            "description": (
+                "HTTP GET a public URL and return extracted text, wrapped as untrusted. "
+                "Blocks localhost and private IPs. Use browser for login or clicking."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "spawn_task",
             "description": "Start a background task. Returns the task id for later steer.",
             "parameters": {

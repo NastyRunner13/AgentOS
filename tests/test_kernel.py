@@ -100,13 +100,22 @@ def test_every_spec_has_explicit_ring():
         "files": 0,
         "browser": 1,
         "computer": 1,
+        "web_search": 0,
+        "web_fetch": 0,
         "spawn_task": 0,
         "kb_read": 0,
         "kb_propose": 1,
         "kb_consolidate": 1,
     }
     assert names == set(expected), names
-    args = {"action": "read", "path": ".", "command": "echo hi", "query": "x", "kind": "fact"}
+    args = {
+        "action": "read",
+        "path": ".",
+        "command": "echo hi",
+        "query": "x",
+        "kind": "fact",
+        "url": "https://example.com",
+    }
     for name, ring in expected.items():
         assert gate.classify(name, args) == ring, name
 

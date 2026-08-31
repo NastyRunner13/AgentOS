@@ -266,6 +266,73 @@ async def test_denied_shell_logged_not_run(tmp_path: Path):
     assert tool["meta"]["denied"] is True
 
 
+async def test_web_search_not_browser(tmp_path: Path, monkeypatch):
+    import tools.web as webmod
+
+    browser_called = []
+
+    async def fake_search(query, perm_cfg, clip=None):
+        return '<untrusted source="web">\n[{"title":"X","url":"https://example.com/x","snippet":"about x"}]\n</untrusted>'
+
+    async def fake_fetch(url, perm_cfg, clip=None):
+        return f'<untrusted source="web" url="{url}">\nExample Domain about x.\n</untrusted>'
+
+    monkeypatch.setattr(webmod, "search", fake_search)
+    monkeypatch.setattr(webmod, "fetch", fake_fetch)
+
+    fake = FakeAdapter(
+        {
+            "script": {
+                "fast-a": '{"clarity":"clear"}',
+                "master-a": [
+                    (
+                        "",
+                        [
+                            {
+                                "id": "w1",
+                                "type": "function",
+                                "function": {
+                                    "name": "web_search",
+                                    "arguments": '{"query":"X"}',
+                                },
+                            }
+                        ],
+                    ),
+                    (
+                        "",
+                        [
+                            {
+                                "id": "w2",
+                                "type": "function",
+                                "function": {
+                                    "name": "web_fetch",
+                                    "arguments": '{"url":"https://example.com/x"}',
+                                },
+                            }
+                        ],
+                    ),
+                    ("X is described at https://example.com/x", []),
+                ],
+            }
+        }
+    )
+    bus, gate, tasks, registry, memory, master = _stack(tmp_path, fake)
+
+    async def boom(args):
+        browser_called.append(args)
+        return "browser should not run"
+
+    master.tools.browser = boom
+    reply = await master.turn("what is X (web)")
+    names = [e["role"] for e in memory.latest(40) if e["kind"] == "tool"]
+    assert "web_search" in names
+    assert "web_fetch" in names
+    assert "browser" not in names
+    assert browser_called == []
+    assert "<untrusted" in next(e["content"] for e in memory.latest(40) if e["role"] == "web_search")
+    assert "https://example.com/x" in reply
+
+
 def test_registry_unknown_role():
     fake = FakeAdapter({})
     registry = Registry(_models(), extra={"fake": fake})
@@ -280,6 +347,12 @@ def test_openrouter_roles_and_memory_stage():
     clarify = models["prompts"]["clarify"]
     assert "files" in clarify
     assert "shell" in clarify
+    assert "web_search" in clarify
+    assert "web_fetch" in clarify
     assert "working directory" in clarify
+    master = models["prompts"]["master"]
+    for token in ("web_search", "files", "browser", "computer"):
+        assert token in master
+    assert "succeeded" in master
     assert mem["stage"] in (0, 1)
     assert mem["stage"] < 2

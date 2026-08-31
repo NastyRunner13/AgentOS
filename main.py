@@ -79,7 +79,7 @@ def boot(root: Path):
         system_prompt=str(prompts.get("master") or "You are Friday."),
         clarify_prompt=str(prompts.get("clarify") or ""),
         clarify=bool(kernel_cfg.get("clarify", True)),
-        max_tool_steps=int(kernel_cfg.get("max_tool_steps", 8)),
+        max_tool_steps=int(kernel_cfg.get("max_tool_steps", 16)),
         secrets=collect_secrets(models_cfg),
         skills=skills,
     )
@@ -542,7 +542,7 @@ async def run_cli(root: Path) -> None:
                 kcfg = load_yaml(cfg_dir / "kernel.yaml")
                 stack["kernel_cfg"] = kcfg
                 master.clarify = bool(kcfg.get("clarify", True))
-                master.max_tool_steps = int(kcfg.get("max_tool_steps", 8))
+                master.max_tool_steps = int(kcfg.get("max_tool_steps", 16)),
                 prompts = stack["registry"].cfg.get("prompts") or {}
                 master.system_prompt = str(prompts.get("master") or master.system_prompt)
                 master.clarify_prompt = str(prompts.get("clarify") or master.clarify_prompt)

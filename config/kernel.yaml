@@ -1,6 +1,6 @@
 data_dir: data
 concurrent_slots: 4
-max_tool_steps: 8
+max_tool_steps: 16
 clarify: true
 tool_result_max_chars: 8000
 stream_token_min_chars: 1
