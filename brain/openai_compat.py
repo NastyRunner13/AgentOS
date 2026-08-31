@@ -62,6 +62,16 @@ async def _consume_openai_sse(resp: httpx.Response, on_token: OnToken) -> tuple[
         if not line:
             continue
         if line.startswith(":") or not line.startswith("data:"):
+            line_str = line.strip()
+            if line_str.startswith("{") and "error" in line_str:
+                try:
+                    obj = json.loads(line_str)
+                    if "error" in obj:
+                        err_obj = obj["error"]
+                        err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
+                        raise RuntimeError(err_msg or "Model API error")
+                except json.JSONDecodeError:
+                    pass
             continue
         data = line[5:].strip()
         if data == "[DONE]":
@@ -70,6 +80,10 @@ async def _consume_openai_sse(resp: httpx.Response, on_token: OnToken) -> tuple[
             chunk = json.loads(data)
         except json.JSONDecodeError:
             continue
+        if "error" in chunk:
+            err_obj = chunk["error"]
+            err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
+            raise RuntimeError(err_msg or "Model API error")
         for choice in chunk.get("choices") or []:
             delta = choice.get("delta") or {}
             thought = _reasoning_piece(delta)
@@ -106,3 +120,4 @@ async def _consume_openai_sse(resp: httpx.Response, on_token: OnToken) -> tuple[
         on_token("</think>")
     ordered = [calls[i] for i in sorted(calls)]
     return "".join(text), ordered
+
