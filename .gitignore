@@ -23,6 +23,7 @@ target/
 *.db
 data/
 evals/runs/
+temp/
 
 # OS junk
 Thumbs.db
