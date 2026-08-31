@@ -10,6 +10,41 @@ import httpx
 from brain.compat import OnToken, _secret, _timeout
 
 
+def wire_messages(messages: list[dict]) -> list[dict]:
+    """OpenAI-compatible payload: ids on tool_calls, null content, valid JSON args."""
+    out: list[dict] = []
+    for msg in messages:
+        m = dict(msg)
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            if not m.get("content"):
+                m["content"] = None
+            calls = []
+            for i, tc in enumerate(m["tool_calls"]):
+                tc = dict(tc)
+                if not str(tc.get("id") or "").strip():
+                    tc["id"] = f"call_{i}"
+                tc["type"] = tc.get("type") or "function"
+                fn = dict(tc.get("function") or {})
+                args = fn.get("arguments", "{}")
+                if not isinstance(args, str):
+                    args = json.dumps(args)
+                else:
+                    try:
+                        json.loads(args or "{}")
+                    except json.JSONDecodeError:
+                        args = "{}"
+                fn["arguments"] = args or "{}"
+                tc["function"] = fn
+                calls.append(tc)
+            m["tool_calls"] = calls
+        elif role == "tool":
+            if not str(m.get("tool_call_id") or "").strip():
+                m["tool_call_id"] = "call_0"
+        out.append(m)
+    return out
+
+
 class OpenAICompat:
     def __init__(self, cfg: dict) -> None:
         self.cfg = cfg
@@ -23,7 +58,11 @@ class OpenAICompat:
         return headers
 
     async def chat(self, model_id: str, messages: list[dict], tools, on_token: OnToken):
-        body: dict[str, Any] = {"model": model_id, "messages": messages, "stream": True}
+        body: dict[str, Any] = {
+            "model": model_id,
+            "messages": wire_messages(messages),
+            "stream": True,
+        }
         if tools:
             body["tools"] = tools
         async with httpx.AsyncClient(timeout=_timeout(self.cfg)) as client:

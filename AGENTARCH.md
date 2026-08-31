@@ -171,6 +171,8 @@ Versioned source of truth, one file per concern: `models.yaml`, `voice.yaml`, `p
 
 `models.yaml` `prompts.master` teaches tool choice (files vs `web_search`/`web_fetch` vs `browser` vs `computer` vs `shell` vs `skill`) and forbids claiming success without a tool result. `prompts.clarify` lists the same tools; research asks are **clear**.
 
+OpenAI-compatible chat fills `tool_call` ids when the model omitted them, and sends empty assistant `content` as null. If the provider errors after a tool result (404/400 — common on some OpenRouter `:free` Nvidia endpoints that accept the first tool call then reject `role=tool`), master retries once with tools flattened to text so the turn still answers.
+
 `permissions.yaml` `web:` (`search_ring`, `fetch_ring`, `search_max_results`, `fetch_timeout_seconds`, `user_agent`, `provider` (`duckduckgo` default), `fallback` (optional `brave`), `brave_api_key_env`). DuckDuckGo HTML needs no API key. Brave needs `BRAVE_API_KEY` in `.env` (scrubbed). Fallback is a no-op without the key.
 
 `kernel.yaml`: `concurrent_slots`, `max_tool_steps` (chat tool-loop cap, 16), `clarify`, `tool_result_max_chars`, `skills_dir`.

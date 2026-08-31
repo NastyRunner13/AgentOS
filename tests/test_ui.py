@@ -9,7 +9,7 @@ from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 from rich.console import Console
 
-from brain.openai_compat import _consume_openai_sse
+from brain.openai_compat import _consume_openai_sse, wire_messages
 from brain.skills import Skill
 from ui.completer import FridayCommandCompleter, SLASH_COMMANDS, resolve_slash
 from ui.mentions import expand_mentions, mention_query, strip_attachments
@@ -421,6 +421,29 @@ def test_session_store_skips_empty(tmp_path: Path):
     store = SessionStore(tmp_path)
     store.save([], "Code")
     assert store.list() == []
+
+
+def test_wire_messages_fills_ids_and_null_content():
+    wired = wire_messages(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "",
+                        "type": "function",
+                        "function": {"name": "web_search", "arguments": "{bad"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "", "content": "hits"},
+        ]
+    )
+    assert wired[0]["content"] is None
+    assert wired[0]["tool_calls"][0]["id"] == "call_0"
+    assert wired[0]["tool_calls"][0]["function"]["arguments"] == "{}"
+    assert wired[1]["tool_call_id"] == "call_0"
 
 
 async def test_openai_reasoning_is_wrapped_not_in_reply():

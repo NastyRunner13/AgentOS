@@ -381,6 +381,52 @@ async def test_allowed_tools_blocks_shell(tmp_path: Path):
     assert any("skill forbids this tool" in e["content"] for e in tools)
 
 
+async def test_tool_followup_404_retries_flattened(tmp_path: Path, monkeypatch):
+    import tools.web as webmod
+
+    async def fake_search(query, perm_cfg, clip=None, **opts):
+        return '<untrusted source="web">\n[{"n":1,"title":"X","url":"https://example.com/x"}]\n</untrusted>'
+
+    monkeypatch.setattr(webmod, "search", fake_search)
+    n = {"master": 0}
+
+    def master_script(messages, tools):
+        n["master"] += 1
+        if n["master"] == 1:
+            return (
+                "",
+                [
+                    {
+                        "id": "",
+                        "type": "function",
+                        "function": {"name": "web_search", "arguments": '{"query":"X"}'},
+                    }
+                ],
+            )
+        if tools:
+            raise RuntimeError(
+                '404 {"error":{"message":"Provider returned error","code":404}}'
+            )
+        blob = " ".join(str(m.get("content") or "") for m in messages)
+        assert "[web_search result]" in blob
+        assert "example.com" in blob
+        return ("X is described at https://example.com/x", [])
+
+    fake = FakeAdapter(
+        {"script": {"fast-a": '{"clarity":"clear"}', "master-a": master_script}}
+    )
+    bus, gate, tasks, registry, memory, master = _stack(tmp_path, fake)
+    reply = await master.turn("what is X (web)")
+    assert "https://example.com/x" in reply
+    assert "model error" not in reply
+    assert n["master"] == 3
+    master_calls = [c for c in fake.calls if c[0] == "master-a"]
+    assert len(master_calls) == 3
+    tool_msg = next(m for m in master_calls[1][1] if m.get("role") == "tool")
+    assert tool_msg["tool_call_id"] == "call_0"
+    assert master_calls[2][2] is None
+
+
 async def test_web_search_not_browser(tmp_path: Path, monkeypatch):
     import tools.web as webmod
 

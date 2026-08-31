@@ -33,6 +33,46 @@ def _json_object(text: str) -> dict | None:
         return None
 
 
+def _with_call_ids(calls: list[dict]) -> list[dict]:
+    out = []
+    for i, call in enumerate(calls):
+        c = dict(call)
+        if not str(c.get("id") or "").strip():
+            c["id"] = f"call_{i}"
+        c["type"] = c.get("type") or "function"
+        c["function"] = dict(c.get("function") or {})
+        out.append(c)
+    return out
+
+
+def _flatten_tool_turns(conv: list[dict]) -> list[dict]:
+    """Drop native tool_calls so a provider that 404s on role=tool can still answer."""
+    out: list[dict] = []
+    for msg in conv:
+        role = msg.get("role")
+        if role == "tool":
+            name = msg.get("name") or "tool"
+            out.append({"role": "user", "content": f"[{name} result]\n{msg.get('content') or ''}"})
+        elif role == "assistant" and msg.get("tool_calls"):
+            names = [
+                ((tc.get("function") or {}).get("name") or "tool") for tc in msg["tool_calls"]
+            ]
+            text = (msg.get("content") or "").strip()
+            called = f"[called {', '.join(names)}]"
+            out.append(
+                {"role": "assistant", "content": f"{text}\n{called}".strip() if text else called}
+            )
+        else:
+            out.append({k: v for k, v in msg.items() if k != "tool_calls"})
+    out.append(
+        {
+            "role": "user",
+            "content": "The tools already ran. Answer from the tool results above. Do not call tools.",
+        }
+    )
+    return out
+
+
 def _parse_args(raw: str) -> dict:
     raw = (raw or "").strip() or "{}"
     try:
@@ -195,9 +235,24 @@ class Master:
                 )
             except Exception as exc:
                 err = self.scrub(str(exc))
+                if any(m.get("role") == "tool" for m in conv):
+                    try:
+                        text, _ignored = await self.registry.complete(
+                            "master",
+                            _flatten_tool_turns(conv),
+                            tools=None,
+                            on_token=capture,
+                        )
+                    except Exception as exc2:
+                        err = self.scrub(str(exc2))
+                    else:
+                        if not streamed and text:
+                            self._emit_text(text, on_token, task.id if task else None)
+                        return text or last
                 self.bus.publish("error", {"error": err})
                 return f"model error: {err}"
             last = text
+            calls = _with_call_ids(calls) if calls else []
             steered = await self.drain_steer(task, conv)
             if not calls and not steered:
                 if not streamed and text:
@@ -222,6 +277,7 @@ class Master:
                     {
                         "role": "tool",
                         "tool_call_id": call.get("id", ""),
+                        "name": (call.get("function") or {}).get("name") or "",
                         "content": self.scrub(result),
                     }
                 )
