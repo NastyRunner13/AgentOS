@@ -142,7 +142,7 @@ HELP = """\
   [bold white]/plugins[/bold white]               Tools & ring specifications
   [bold white]/settings[/bold white]              Runtime dials (clarify, slots, etc.)
   [bold white]/listen [text][/bold white]         Push-to-talk (Enter to stop), or inject text
-  [bold white]/orb[/bold white]                   Hide or show the voice bar
+  [bold white]/orb[/bold white]                   Hide or show the voice orb
   [bold white]/task <title> <prompt>[/bold white] Background turn (steer-able)
   [bold white]/steer <id> <text>[/bold white]     Inject guidance into a running task
   [bold white]/tasks[/bold white]                 Running and queued tasks
@@ -611,15 +611,16 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
             voice.start(voice_turn)
             wake = str((voice_cfg.get("wake_word") or {}).get("engine") or "none")
             extra = "" if wake == "none" else f"  wake {wake}"
-            console.print(f"[dim]voice on[/dim]  /listen · click the voice button{extra}")
+            console.print(f"[dim]voice on[/dim]  /listen · click the orb{extra}")
             orb_cfg = voice_cfg.get("orb") or {}
             if orb_cfg.get("enabled", True):
                 from orb import Overlay, Presence
 
                 presence = Presence()
                 overlay = Overlay(
-                    width=int(orb_cfg.get("width") or 320),
-                    height=int(orb_cfg.get("height") or 56),
+                    size=int(orb_cfg.get("size") or 140),
+                    width=int(orb_cfg["width"]) if orb_cfg.get("width") is not None else None,
+                    height=int(orb_cfg["height"]) if orb_cfg.get("height") is not None else None,
                     on_toggle=voice.toggle_listen,
                     on_mute=on_orb_mute,
                     on_sleep=on_orb_sleep,
@@ -629,7 +630,7 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
                     stack["orb"] = overlay
                     stack["presence"] = presence
                     overlay.push(presence)
-                    console.print("[dim]voice bar on[/dim]  click to talk · /orb hides")
+                    console.print("[dim]orb on[/dim]  click to talk · /orb hides")
                 else:
                     console.print("[yellow]orb off[/yellow]  tkinter missing")
         except (EngineMissing, ValueError) as exc:
@@ -855,7 +856,7 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
             if line == "/orb":
                 o = stack.get("orb")
                 if o is None:
-                    console.print("[yellow]voice bar is off[/yellow]  python main.py --cli --voice")
+                    console.print("[yellow]orb is off[/yellow]  python main.py --cli --voice")
                     continue
                 o.toggle_visible()
                 continue
@@ -936,7 +937,7 @@ def main() -> None:
     parser.add_argument(
         "--voice",
         action="store_true",
-        help="start VoiceIO and the voice bar (click / /listen / hotkey)",
+        help="start VoiceIO and the voice orb (click / /listen / hotkey)",
     )
     parser.add_argument("--eval", action="store_true", help="run the Phase 2 eval suite")
     parser.add_argument("--root", default=str(ROOT), help="repo root (configs live in <root>/config)")

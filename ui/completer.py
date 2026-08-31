@@ -25,7 +25,7 @@ SLASH_COMMANDS: dict[str, str] = {
     "/proposals": "View pending Librarian memory proposals",
     "/consolidate": "Trigger Librarian consolidation draft",
     "/listen": "Push-to-talk, or /listen <text> to inject a transcript",
-    "/orb": "Hide or show the voice bar",
+    "/orb": "Hide or show the voice orb",
     "/task": "Spawn background task: /task <title> <prompt>",
     "/steer": "Inject steer into running task: /steer <id> <text>",
     "/tasks": "List running and queued background tasks",

@@ -72,7 +72,7 @@ def show_shortcuts_dialog() -> None:
                 ("Steer running background task", "/steer <id> <text>"),
                 ("Spawn background task", "/task <title> <prompt>"),
                 ("Voice push-to-talk or inject text", "/listen [text]"),
-                ("Hide or show the voice bar", "/orb"),
+                ("Hide or show the voice orb", "/orb"),
             ],
         ),
         (
