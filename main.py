@@ -34,7 +34,11 @@ def load_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
-def collect_secrets(models_cfg: dict, perm_cfg: dict | None = None) -> list[str]:
+def collect_secrets(
+    models_cfg: dict,
+    perm_cfg: dict | None = None,
+    voice_cfg: dict | None = None,
+) -> list[str]:
     found = []
     seen: set[str] = set()
     names: list[str] = []
@@ -44,6 +48,8 @@ def collect_secrets(models_cfg: dict, perm_cfg: dict | None = None) -> list[str]
             names.append(env)
     web = (perm_cfg or {}).get("web") or {}
     names.append(str(web.get("brave_api_key_env") or "BRAVE_API_KEY"))
+    stt = (voice_cfg or {}).get("stt") or {}
+    names.append(str(stt.get("api_key_env") or "GROQ_API_KEY"))
     for env in names:
         val = os.environ.get(env)
         if val and val not in seen:
@@ -60,6 +66,8 @@ def boot(root: Path):
     kernel_cfg = load_yaml(cfg_dir / "kernel.yaml")
     mem_path = cfg_dir / "memory.yaml"
     mem_cfg = load_yaml(mem_path) if mem_path.is_file() else {}
+    voice_path = cfg_dir / "voice.yaml"
+    voice_cfg = load_yaml(voice_path) if voice_path.is_file() else {}
     bus = Bus()
     slots = int(kernel_cfg.get("concurrent_slots", 4))
     gate = Gate(perm_cfg, bus)
@@ -97,7 +105,7 @@ def boot(root: Path):
         clarify_prompt=str(prompts.get("clarify") or ""),
         clarify=bool(kernel_cfg.get("clarify", True)),
         max_tool_steps=int(kernel_cfg.get("max_tool_steps", 16)),
-        secrets=collect_secrets(models_cfg, perm_cfg),
+        secrets=collect_secrets(models_cfg, perm_cfg, voice_cfg),
         skills=skills,
     )
     return {
@@ -112,6 +120,7 @@ def boot(root: Path):
         "perm_cfg": perm_cfg,
         "kernel_cfg": kernel_cfg,
         "mem_cfg": mem_cfg,
+        "voice_cfg": voice_cfg,
         "skills": skills,
     }
 
@@ -132,6 +141,8 @@ HELP = """\
   [bold white]/skill <name> [args][/bold white]   Run a skill (also /<name>)
   [bold white]/plugins[/bold white]               Tools & ring specifications
   [bold white]/settings[/bold white]              Runtime dials (clarify, slots, etc.)
+  [bold white]/listen [text][/bold white]         Push-to-talk (Enter to stop), or inject text
+  [bold white]/orb[/bold white]                   Hide or show the voice bar
   [bold white]/task <title> <prompt>[/bold white] Background turn (steer-able)
   [bold white]/steer <id> <text>[/bold white]     Inject guidance into a running task
   [bold white]/tasks[/bold white]                 Running and queued tasks
@@ -207,7 +218,7 @@ def _friday_prompt(store, mode: str, cwd: str = "", branch: str = ""):
     )
 
 
-async def run_cli(root: Path) -> None:
+async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
     try:
         from prompt_toolkit.formatted_text import HTML
         from prompt_toolkit.patch_stdout import patch_stdout
@@ -253,7 +264,7 @@ async def run_cli(root: Path) -> None:
     stack["sessions"] = store
     renderer = TurnRenderer(console)
     current_mode = "Code"
-    ui_state = {"foreground": False}
+    ui_state = {"foreground": False, "prompt_up": False}
 
     async def watch(topic: str, handler) -> None:
         q = bus.subscribe(topic)
@@ -262,7 +273,26 @@ async def run_cli(root: Path) -> None:
             if asyncio.iscoroutine(result):
                 await result
 
+    def feed_orb(kind: str, ev: dict) -> None:
+        p = stack.get("presence")
+        o = stack.get("orb")
+        if p is None:
+            return
+        if kind == "state":
+            p.on_state(ev)
+        elif kind == "tts":
+            p.on_tts(ev)
+        elif kind == "mic":
+            p.on_mic(ev)
+        elif kind == "card":
+            p.on_card(ev)
+        elif kind == "resolved":
+            p.on_resolved(ev)
+        if o is not None:
+            o.push(p)
+
     def on_state(ev: dict) -> None:
+        feed_orb("state", ev)
         if ev.get("task_id") and ui_state["foreground"]:
             return
         phase = ev.get("phase")
@@ -275,6 +305,12 @@ async def run_cli(root: Path) -> None:
         elif phase == "idle":
             renderer.on_idle()
             store.save(master.history, current_mode)
+        elif phase == "listening":
+            console.print("[dim][listening][/dim]")
+        elif phase == "speaking":
+            console.print("[dim][speaking][/dim]")
+        elif phase == "waking":
+            console.print("[dim][waking][/dim]")
 
     def on_tool_call(ev: dict) -> None:
         if ev.get("task_id") and ui_state["foreground"]:
@@ -291,10 +327,13 @@ async def run_cli(root: Path) -> None:
         renderer.on_tool_result(ev.get("name") or "", ev.get("result") or "")
 
     async def on_card(ev: dict) -> None:
+        feed_orb("card", ev)
         renderer.on_card()
         render_card(ev)
         cid = ev.get("id", "")
         if not ui_state["foreground"] or cid not in gate.pending():
+            return
+        if ui_state.get("prompt_up"):
             return
         try:
             from prompt_toolkit import PromptSession
@@ -312,6 +351,7 @@ async def run_cli(root: Path) -> None:
             console.print("[green]allowed[/green]" if ok else "[yellow]denied[/yellow]")
 
     def on_resolved(ev: dict) -> None:
+        feed_orb("resolved", ev)
         if not ev.get("expired"):
             return
         cid = ev.get("id", "")
@@ -328,6 +368,8 @@ async def run_cli(root: Path) -> None:
         asyncio.create_task(watch("approval.request", on_card)),
         asyncio.create_task(watch("approval.resolved", on_resolved)),
         asyncio.create_task(watch("error", on_error)),
+        asyncio.create_task(watch("tts.amplitude", lambda ev: feed_orb("tts", ev))),
+        asyncio.create_task(watch("mic.amplitude", lambda ev: feed_orb("mic", ev))),
     ]
 
     master_model = stack["models_cfg"].get("roles", {}).get("master", "claude-3-7-sonnet")
@@ -467,17 +509,21 @@ async def run_cli(root: Path) -> None:
     )
 
     async def read_line() -> str:
-        if session:
-            from ui.composer import Composer
+        ui_state["prompt_up"] = True
+        try:
+            if session:
+                from ui.composer import Composer
 
-            if isinstance(session, Composer):
-                return await session.prompt_async()
-            cwd_s, branch_s = workspace_bits()
-            return await session.prompt_async(
-                lambda: _friday_prompt(store, current_mode, cwd_s, branch_s),
-                placeholder=HTML('<style color="#6c6c6c">message, @file, or /command</style>') if HTML else None,
-            )
-        return await asyncio.to_thread(input, "Friday> ")
+                if isinstance(session, Composer):
+                    return await session.prompt_async()
+                cwd_s, branch_s = workspace_bits()
+                return await session.prompt_async(
+                    lambda: _friday_prompt(store, current_mode, cwd_s, branch_s),
+                    placeholder=HTML('<style color="#6c6c6c">message, @file, or /command</style>') if HTML else None,
+                )
+            return await asyncio.to_thread(input, "Friday> ")
+        finally:
+            ui_state["prompt_up"] = False
 
     def attach_files(text: str) -> str:
         from ui.mentions import expand_mentions
@@ -485,24 +531,109 @@ async def run_cli(root: Path) -> None:
         max_chars = int(stack["kernel_cfg"].get("tool_result_max_chars", 8000))
         return expand_mentions(text, root, max_chars=max_chars)
 
-    async def run_foreground(prompt: str, *, shown: str, skip_clarify: bool = False) -> None:
-        render_user(shown)
-        if not session:
-            asyncio.create_task(master.turn(prompt, skip_clarify=skip_clarify))
-            return
-        renderer.begin_turn()
-        ui_state["foreground"] = True
-        try:
-            await master.turn(prompt, skip_clarify=skip_clarify)
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            console.print("[yellow]turn cancelled[/yellow]")
-        except Exception as exc:
-            console.print(f"[bold red]error[/bold red] {exc}")
+    turn_lock = asyncio.Lock()
 
-        finally:
-            ui_state["foreground"] = False
-            renderer.finish()
-            store.save(master.history, current_mode)
+    async def run_foreground(prompt: str, *, shown: str, skip_clarify: bool = False) -> None:
+        async with turn_lock:
+            render_user(shown)
+            if not session:
+                asyncio.create_task(master.turn(prompt, skip_clarify=skip_clarify))
+                return
+            renderer.begin_turn()
+            ui_state["foreground"] = True
+            try:
+                await master.turn(prompt, skip_clarify=skip_clarify)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                console.print("[yellow]turn cancelled[/yellow]")
+            except Exception as exc:
+                console.print(f"[bold red]error[/bold red] {exc}")
+
+            finally:
+                ui_state["foreground"] = False
+                renderer.finish()
+                store.save(master.history, current_mode)
+
+    async def voice_turn(text: str) -> str:
+        await run_foreground(text, shown=f"(voice) {text}")
+        for msg in reversed(master.history):
+            if msg.get("role") == "assistant":
+                return str(msg.get("content") or "")
+        return ""
+
+    def on_orb_mute() -> None:
+        v = stack.get("voice")
+        p = stack.get("presence")
+        o = stack.get("orb")
+        if v is None:
+            return
+        v.muted = not v.muted
+        if v.muted:
+            v.stop_record()
+        if p is not None:
+            p.muted = v.muted
+            if o is not None:
+                o.push(p)
+
+    def on_orb_sleep() -> None:
+        v = stack.get("voice")
+        p = stack.get("presence")
+        o = stack.get("orb")
+        if v is not None:
+            v.muted = True
+            v.stop_record()
+            v.cancel()
+        if p is not None:
+            p.muted = True
+        if o is not None:
+            o.hide()
+            if p is not None:
+                o.push(p)
+
+    def on_orb_close() -> None:
+        o = stack.get("orb")
+        if o is not None:
+            o.stop()
+        stack["orb"] = None
+
+    voice_cfg = stack.get("voice_cfg") or {}
+    if voice_flag or voice_cfg.get("enabled"):
+        from voice import EngineMissing, VoiceIO, make_stt, make_tts
+
+        try:
+            voice = VoiceIO(
+                bus,
+                voice_cfg,
+                make_stt(voice_cfg),
+                make_tts(voice_cfg),
+                resolve_card=gate.resolve,
+            )
+            stack["voice"] = voice
+            voice.start(voice_turn)
+            wake = str((voice_cfg.get("wake_word") or {}).get("engine") or "none")
+            extra = "" if wake == "none" else f"  wake {wake}"
+            console.print(f"[dim]voice on[/dim]  /listen · click the voice button{extra}")
+            orb_cfg = voice_cfg.get("orb") or {}
+            if orb_cfg.get("enabled", True):
+                from orb import Overlay, Presence
+
+                presence = Presence()
+                overlay = Overlay(
+                    width=int(orb_cfg.get("width") or 320),
+                    height=int(orb_cfg.get("height") or 56),
+                    on_toggle=voice.toggle_listen,
+                    on_mute=on_orb_mute,
+                    on_sleep=on_orb_sleep,
+                    on_close=on_orb_close,
+                )
+                if overlay.start(asyncio.get_running_loop()):
+                    stack["orb"] = overlay
+                    stack["presence"] = presence
+                    overlay.push(presence)
+                    console.print("[dim]voice bar on[/dim]  click to talk · /orb hides")
+                else:
+                    console.print("[yellow]orb off[/yellow]  tkinter missing")
+        except (EngineMissing, ValueError) as exc:
+            console.print(f"[yellow]voice off[/yellow]  {exc}")
 
     stdout_patch = None
     try:
@@ -653,7 +784,14 @@ async def run_cli(root: Path) -> None:
                 master.system_prompt = str(prompts.get("master") or master.system_prompt)
                 master.clarify_prompt = str(prompts.get("clarify") or master.clarify_prompt)
                 master.tools.perm_cfg = stack["perm_cfg"]
-                master.secrets = collect_secrets(stack["registry"].cfg, stack["perm_cfg"])
+                vpath = cfg_dir / "voice.yaml"
+                if vpath.is_file():
+                    stack["voice_cfg"] = load_yaml(vpath)
+                    if stack.get("voice") is not None:
+                        stack["voice"].cfg = stack["voice_cfg"]
+                master.secrets = collect_secrets(
+                    stack["registry"].cfg, stack["perm_cfg"], stack.get("voice_cfg")
+                )
                 mem_path = cfg_dir / "memory.yaml"
                 if mem_path.is_file():
                     stack["memory"].cfg = load_yaml(mem_path)
@@ -714,6 +852,53 @@ async def run_cli(root: Path) -> None:
                 except (KeyError, ValueError) as exc:
                     console.print(f"[bold red]{exc}[/bold red]")
                 continue
+            if line == "/orb":
+                o = stack.get("orb")
+                if o is None:
+                    console.print("[yellow]voice bar is off[/yellow]  python main.py --cli --voice")
+                    continue
+                o.toggle_visible()
+                continue
+            if line == "/listen" or line.startswith("/listen "):
+                rest = line.split(None, 1)[1].strip() if " " in line else ""
+                voice = stack.get("voice")
+                if voice is None:
+                    console.print(
+                        "[yellow]voice is off[/yellow]  python main.py --cli --voice"
+                    )
+                    continue
+                try:
+                    if voice.origin and not voice.waiting_for_card:
+                        console.print("[yellow]voice turn in progress[/yellow]")
+                        continue
+                    if rest:
+                        item: str | bytes = rest
+                    else:
+                        if voice.recording:
+                            voice.stop_record()
+                            console.print("[dim]stopped listening[/dim]")
+                            continue
+                        console.print("[dim][listening] speak, then Enter[/dim]")
+                        halt = asyncio.Event()
+                        rec = asyncio.create_task(voice.record(halt, use_vad=False))
+                        try:
+                            await read_line()
+                        except (EOFError, KeyboardInterrupt):
+                            halt.set()
+                            rec.cancel()
+                            continue
+                        halt.set()
+                        item = await rec
+                    if voice.waiting_for_card:
+                        heard = item if isinstance(item, str) else await voice.transcribe(item)
+                        if heard:
+                            await voice.hear(heard)
+                        continue
+                    text = item if isinstance(item, str) else await voice.transcribe(item)
+                    await voice.utter(text=text, turn=voice_turn)
+                except Exception as exc:
+                    console.print(f"[bold red]voice[/bold red] {exc}")
+                continue
             if line.startswith("/task "):
                 rest = line[6:].strip()
                 title, _, prompt = rest.partition(" ")
@@ -737,6 +922,10 @@ async def run_cli(root: Path) -> None:
                 pass
         for w in watchers:
             w.cancel()
+        if stack.get("orb") is not None:
+            stack["orb"].stop()
+        if stack.get("voice") is not None:
+            await stack["voice"].stop()
         store.save(master.history, current_mode)
         stack["memory"].close()
 
@@ -744,6 +933,11 @@ async def run_cli(root: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="AgentOS")
     parser.add_argument("--cli", action="store_true", help="interactive chat loop")
+    parser.add_argument(
+        "--voice",
+        action="store_true",
+        help="start VoiceIO and the voice bar (click / /listen / hotkey)",
+    )
     parser.add_argument("--eval", action="store_true", help="run the Phase 2 eval suite")
     parser.add_argument("--root", default=str(ROOT), help="repo root (configs live in <root>/config)")
     args = parser.parse_args()
@@ -763,7 +957,7 @@ def main() -> None:
         )
         return
     if args.cli:
-        asyncio.run(run_cli(root))
+        asyncio.run(run_cli(root, voice_flag=args.voice))
         return
     parser.print_help()
     print("\nPhase 1 surface is the CLI: python main.py --cli")

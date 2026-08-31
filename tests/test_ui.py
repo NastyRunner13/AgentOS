@@ -70,7 +70,7 @@ def test_completer_matches_root_slash_commands():
 
 
 def test_completer_includes_session_commands():
-    for cmd in ("/new", "/resume", "/sessions", "/rename", "/exit", "/shortcuts", "/plan"):
+    for cmd in ("/new", "/resume", "/sessions", "/rename", "/exit", "/shortcuts", "/plan", "/listen", "/orb"):
         assert cmd in SLASH_COMMANDS
     completer = FridayCommandCompleter()
     texts = [m.text for m in completer.get_completions(Document(text="/re"), CompleteEvent())]
@@ -155,6 +155,8 @@ def test_resolve_slash_routes_builtins_and_skills(tmp_path: Path):
     assert resolve_slash("/resume abc", skills) == ("command", "resume", "abc")
     assert resolve_slash("/shortcuts", skills) == ("command", "shortcuts", "")
     assert resolve_slash("/plan", skills) == ("command", "plan", "")
+    assert resolve_slash("/listen open notepad", skills) == ("command", "listen", "open notepad")
+    assert resolve_slash("/orb", skills) == ("command", "orb", "")
     assert resolve_slash("/commit fix typo", skills) == ("skill", "commit", "fix typo")
     assert resolve_slash("/skill commit fix typo", skills) == ("skill", "commit", "fix typo")
     assert resolve_slash("/skill", skills) == ("command", "skills", "")
