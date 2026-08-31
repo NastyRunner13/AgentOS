@@ -65,8 +65,7 @@ def test_voice_yaml_schema():
     assert cfg["vad"]["engine"] in ("none", "energy", "silero")
     assert "threshold" in cfg["vad"]
     assert cfg["orb"]["enabled"] in (True, False)
-    assert int(cfg["orb"]["width"]) >= 160
-    assert int(cfg["orb"]["height"]) >= 40
+    assert int(cfg["orb"]["size"]) >= 80
 
 
 def test_voice_package_does_not_import_master():

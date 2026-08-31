@@ -41,5 +41,4 @@ sample_rate: 16000
 
 orb:
   enabled: true             # overlay when VoiceIO starts; /orb hides
-  width: 320
-  height: 56
+  size: 140                 # square ElevenLabs orb, px

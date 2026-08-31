@@ -14,7 +14,7 @@
 One Python kernel process owns an asyncio event bus. A **master** agent clarifies ambiguous requests, wraps risky actions in **cards**, and delegates — while you keep working. Long work runs as background **tasks** you can **steer**.
 
 Phases 1–2 are implemented. Phase 3 is memory stage 1 *(librarian proposals, confirmed-fact recall)*.
-Phase 4 voice is push-to-talk on the existing kernel (`python main.py --cli --voice`). Phase 5 slice 1 is a bottom-center voice bar driven by bus events. The Tauri desktop app and phone PWA come later.
+Phase 4 voice is push-to-talk on the existing kernel (`python main.py --cli --voice`). Phase 5 slice 1 is a bottom-center ElevenLabs orb driven by bus events. The Tauri desktop app and phone PWA come later.
 
 <br/>
 
@@ -40,7 +40,7 @@ copy .env.example .env
 ```bash
 # Run
 python main.py --cli          # Interactive agent session
-python main.py --cli --voice  # Same process: /listen, hotkey, voice bar
+python main.py --cli --voice  # Same process: /listen, hotkey, voice orb
 python -m pytest -q            # Run test suite (offline, no keys needed)
 python main.py --eval          # Evaluation harness
 ```
@@ -109,7 +109,7 @@ AgentOS/
 │
 ├── evals/             # Phase 2 scenario suite & harness
 ├── voice/             # VoiceIO client (STT/TTS engines, no Master import)
-├── orb/               # Voice bar overlay (bus subscriber, no mic)
+├── orb/               # ElevenLabs orb overlay (bus subscriber, no mic)
 ├── tests/             # Kernel · tools · master · phase 1–5 acceptance tests
 │
 ├── main.py            # Entrypoint:  --cli [--voice]  |  --eval
@@ -163,7 +163,7 @@ graph LR
     P2["✅ Phase 2\nReliability Layer"]
     P3["🔨 Phase 3\nMemory Stages"]
     P4["🔨 Phase 4\nVoice"]
-    P5["🔨 Phase 5\nSurfaces (voice bar)"]
+    P5["🔨 Phase 5\nSurfaces (voice orb)"]
     P6["⬜ Phase 6\nEarned Autonomy"]
 
     P1 --> P1b

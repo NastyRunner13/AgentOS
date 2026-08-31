@@ -40,7 +40,7 @@ Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY` (or retarget `config/
 | Shell, files, browser, computer | `tools/` |
 | CLI renderer, slash menu, session files | `ui/` |
 | Voice engines, PTT, `tts.amplitude` | `voice/`, `config/voice.yaml` |
-| Voice bar overlay (bus subscriber) | `orb/` |
+| Voice orb overlay (bus subscriber) | `orb/` |
 | Scenario suite | `evals/` |
 | DONE WHEN coverage | `tests/test_phaseN.py` |
 
@@ -109,4 +109,4 @@ A patch is ready when:
 
 ## What this repo is not yet
 
-Phase 1–2 are implemented. Phase 3 is memory stage 1 (librarian proposals, confirmed-fact recall). Phase 1b (first **loop**) is specified, not shipped. Phase 4 voice is the bus contract + `/listen` + energy VAD on bar click; wake-word always-on and Silero barge-in still wait. Phase 5 slice 1 is the Python voice bar; Tauri and phone wait. MCP and **earned** autonomy wait on their phase gates. Nothing grants itself **earned** status.
+Phase 1–2 are implemented. Phase 3 is memory stage 1 (librarian proposals, confirmed-fact recall). Phase 1b (first **loop**) is specified, not shipped. Phase 4 voice is the bus contract + `/listen` + energy VAD on orb click; wake-word always-on and Silero barge-in still wait. Phase 5 slice 1 is the Python ElevenLabs orb; Tauri and phone wait. MCP and **earned** autonomy wait on their phase gates. Nothing grants itself **earned** status.
