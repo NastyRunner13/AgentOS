@@ -279,7 +279,11 @@ async def run_cli(root: Path) -> None:
     def on_tool_call(ev: dict) -> None:
         if ev.get("task_id") and ui_state["foreground"]:
             return
-        renderer.on_tool_call(ev.get("name") or "", ev.get("args") or {}, int(ev.get("ring") or 1))
+        renderer.on_tool_call(
+            ev.get("name") or "",
+            ev.get("args") or {},
+            ui_renderer.coerce_ring(ev.get("ring")),
+        )
 
     def on_tool_result(ev: dict) -> None:
         if ev.get("task_id") and ui_state["foreground"]:

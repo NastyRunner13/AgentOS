@@ -24,6 +24,7 @@ from ui.dialogs import (
 from ui.composer import size_changed
 from ui.renderer import (
     TurnRenderer,
+    coerce_ring,
     display_user_content,
     fmt_duration,
     render_banner,
@@ -421,6 +422,12 @@ def test_session_store_skips_empty(tmp_path: Path):
     store = SessionStore(tmp_path)
     store.save([], "Code")
     assert store.list() == []
+
+
+def test_coerce_ring_keeps_zero():
+    assert coerce_ring(0) == 0
+    assert coerce_ring(None) == 1
+    assert coerce_ring("2") == 2
 
 
 def test_wire_messages_fills_ids_and_null_content():

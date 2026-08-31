@@ -55,6 +55,12 @@ FRIDAY_THEME = Theme(
 console = Console(theme=FRIDAY_THEME, highlight=False, soft_wrap=True, legacy_windows=False)
 
 RING_STYLE = {0: "ring0", 1: "ring1", 2: "ring2", 3: "ring2"}
+
+
+def coerce_ring(ring, default: int = 1) -> int:
+    if ring is None:
+        return default
+    return int(ring)
 SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 FRIDAY_BRAILLE_LOGO = [
