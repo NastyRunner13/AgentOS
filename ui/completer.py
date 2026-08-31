@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Optional
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 
@@ -18,6 +18,9 @@ SLASH_COMMANDS: dict[str, str] = {
     "/skill": "Run a skill: /skill <name> [args] (also /<name>)",
     "/plugins": "View active tool specs & integrations",
     "/settings": "Adjust runtime parameters (clarify, max steps, slots)",
+    "/shortcuts": "View keyboard shortcuts & command palette (Ctrl+X)",
+    "/keys": "Alias for /shortcuts",
+    "/plan": "View active plan and review actions",
     "/facts": "View confirmed long-term memory facts",
     "/proposals": "View pending Librarian memory proposals",
     "/consolidate": "Trigger Librarian consolidation draft",
@@ -49,6 +52,9 @@ BUILTIN_COMMANDS = {
     "plugins",
     "tools",
     "settings",
+    "shortcuts",
+    "keys",
+    "plan",
     "facts",
     "proposals",
     "consolidate",
@@ -64,6 +70,7 @@ BUILTIN_COMMANDS = {
     "quit",
     "exit",
 }
+
 
 
 def resolve_slash(line: str, skills: list | None = None) -> tuple[str, str, str]:
@@ -248,3 +255,41 @@ class FridayCommandCompleter(Completer):
                             display=command,
                             display_meta=f"skill · {desc[:40]}" if desc else "skill",
                         )
+            return
+
+        query = _file_mention_query(text)
+        if query is None:
+            return
+        root = None
+        if self.stack_getter:
+            try:
+                root = (self.stack_getter() or {}).get("root")
+            except Exception:
+                root = None
+        if root is None:
+            return
+        from ui.mentions import list_workspace_paths
+
+        needle = query.replace("\\", "/").lower()
+        ranked: list[tuple[int, str, bool]] = []
+        for rel, is_dir in list_workspace_paths(root):
+            path_l = rel.lower()
+            name = rel.rstrip("/").rsplit("/", 1)[-1].lower()
+            if needle and not (path_l.startswith(needle) or needle in path_l or name.startswith(needle)):
+                continue
+            rank = 0 if path_l.startswith(needle) else (1 if name.startswith(needle) else 2)
+            ranked.append((rank, rel, is_dir))
+        ranked.sort(key=lambda row: (row[0], row[1].lower()))
+        for _rank, rel, is_dir in ranked[:40]:
+            yield Completion(
+                rel,
+                start_position=-len(query),
+                display=rel,
+                display_meta="dir" if is_dir else "file",
+            )
+
+
+def _file_mention_query(text: str) -> str | None:
+    from ui.mentions import mention_query
+
+    return mention_query(text)

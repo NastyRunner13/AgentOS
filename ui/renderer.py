@@ -2,66 +2,82 @@
 
 from __future__ import annotations
 
+import shutil
+import sys
 import time
 from typing import Any, Optional
 
-from rich.console import Console, Group
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+from rich.console import Console, Group, RenderableType
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
-from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
 FRIDAY_THEME = Theme(
     {
-        "info": "dim cyan",
-        "warning": "yellow",
-        "error": "bold red",
-        "success": "bold green",
-        "thought": "italic #7f849c",
-        "tool": "cyan",
-        "ring0": "green",
-        "ring1": "yellow",
-        "ring2": "bold red",
-        "banner": "bold cyan",
-        "you": "bold blue",
-        "footer": "dim",
-        "spinner": "bold cyan",
-        "tool_ok": "bold green",
-        "tool_run": "bold yellow",
-        "tool_fail": "bold red",
-        "gutter": "dim cyan",
-        "rule": "dim",
+        "info": "dim #8b8b90",
+        "warning": "bold #e0af68",
+        "error": "bold #f38ba8",
+        "success": "bold #00ff00",
+        "thought": "italic #c0c0c0",
+        "thought_dim": "dim #8b8b90",
+        "tool": "bold #8db0ff",
+        "diamond": "bold #e0af68",
+        "diamond_dim": "#808080",
+        "amber": "bold #e0af68",
+        "silver": "#e1e1e1",
+        "muted": "#8b8b90",
+        "dim": "#6c6c6c",
+        "ring0": "bold #00ff00",
+        "ring1": "bold #e0af68",
+        "ring2": "bold #f38ba8",
+        "banner": "bold #e0af68",
+        "you": "bold #8db0ff",
+        "footer": "dim #8b8b90",
+        "spinner": "bold #e0af68",
+        "tool_ok": "bold #00ff00",
+        "tool_run": "bold #e0af68",
+        "tool_fail": "bold #f38ba8",
+        "gutter": "#808080",
+        "rule": "#404040",
     }
 )
 
-console = Console(theme=FRIDAY_THEME)
+console = Console(theme=FRIDAY_THEME, highlight=False, soft_wrap=True, legacy_windows=False)
 
 RING_STYLE = {0: "ring0", 1: "ring1", 2: "ring2", 3: "ring2"}
-TOOL_HINT = {
-    "shell": "sh",
-    "files": "file",
-    "browser": "web",
-    "computer": "os",
-    "kb_propose": "kb",
-    "kb_read": "kb",
-    "kb_consolidate": "kb",
-    "spawn_task": "task",
-}
+SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-TOOL_ICON = {
-    "shell": "⚡",
-    "files": "📄",
-    "browser": "🌐",
-    "computer": "🖥",
-    "kb_propose": "📝",
-    "kb_read": "📖",
-    "kb_consolidate": "📚",
-    "spawn_task": "🚀",
-}
+FRIDAY_BRAILLE_LOGO = [
+    "  ⢀⣤⣶⣶⣶⣶⣶⣤⡀  ",
+    "  ⢸⣿⣿⠛⠉⠉⠉⠉⠁  ",
+    "  ⢸⣿⣿⣶⣶⣶⣶⣤⡀  ",
+    "  ⢸⣿⣿⠉⠉⠉⠉⠉⠁  ",
+    "  ⠘⢿⣿⣿         ",
+]
+
+
+def term_cols(out: Console | None = None) -> int:
+    if out is not None:
+        try:
+            width = int(out.width or 0)
+            if width >= 20:
+                return width
+        except Exception:
+            pass
+    try:
+        return max(20, shutil.get_terminal_size(fallback=(80, 24)).columns)
+    except Exception:
+        return 80
 
 
 def fmt_duration(seconds: float) -> str:
@@ -91,29 +107,37 @@ def _short_args(args: dict[str, Any], width: int = 56) -> str:
     elif "query" in args:
         text = str(args.get("query") or "")
     else:
-        text = " ".join(f"{k}={v}" for k, v in list(args.items())[:3])
+        skip = {"content", "_size"}
+        text = " ".join(f"{k}={v}" for k, v in list(args.items())[:3] if k not in skip)
     text = " ".join(text.split())
+    width = max(12, width)
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
-def _tool_heading(name: str, args: dict[str, Any], ring: int, suffix: str = "") -> Text:
-    icon = TOOL_ICON.get(name, "⚙")
-    # Determine status icon and style from suffix
+def _tool_heading(
+    name: str,
+    args: dict[str, Any],
+    ring: int,
+    suffix: str = "",
+    *,
+    width: int = 80,
+) -> Text:
+    """Left-gutter tool line: ┃  ◆ files  write path  ring N  ✓ done 40ms."""
     if suffix.startswith("done"):
-        status_icon = "✓"
-        status_style = "tool_ok"
-    elif suffix == "running":
-        status_icon = "⏳"
-        status_style = "tool_run"
+        status_icon, status_style = "✓", "tool_ok"
+    elif suffix.startswith("running"):
+        status_icon, status_style = "⏳", "tool_run"
+    elif suffix.startswith("denied") or suffix.startswith("fail"):
+        status_icon, status_style = "✗", "tool_fail"
     else:
-        status_icon = "›"
-        status_style = "dim"
-    line = Text("  ")
-    line.append(f"{icon} ", style=status_style)
-    line.append(TOOL_HINT.get(name, "fn"), style="tool")
-    line.append("  ")
+        status_icon, status_style = "›", "dim"
+
+    arg_width = max(12, width - 36 - len(name) - len(suffix))
+    line = Text()
+    line.append("┃  ", style="gutter")
+    line.append("◆ ", style="diamond")
     line.append(name, style="bold")
-    summary = _short_args(args)
+    summary = _short_args(args, arg_width)
     if summary:
         line.append("  ")
         line.append(summary, style="dim")
@@ -126,13 +150,37 @@ def _tool_heading(name: str, args: dict[str, Any], ring: int, suffix: str = "") 
 
 
 def _gutter_preview(text: str, width: int = 72) -> Text:
-    """Format a tool result preview with a left-border gutter."""
     preview = " ".join(text.split())
+    width = max(12, width)
     if len(preview) > width:
         preview = preview[: width - 1] + "…"
-    line = Text("    │ ", style="gutter")
+    line = Text("┃  │ ", style="gutter")
     line.append(preview, style="dim")
     return line
+
+
+def _write_preview(args: dict[str, Any], result: str, width: int) -> list[Text]:
+    """Compact file-write snippet; other tools get a single gutter preview."""
+    lines: list[Text] = []
+    inner = max(16, width - 10)
+    action = str(args.get("action") or "")
+    content = str(args.get("content") or "")
+    if result:
+        lines.append(_gutter_preview(result, inner + 4))
+    if content and action == "write":
+        raw = content.splitlines() or [content]
+        shown = raw[:8]
+        for i, row in enumerate(shown, 1):
+            t = Text("┃  │ ", style="gutter")
+            t.append(f"{i:3d} ", style="dim")
+            t.append(row[:inner], style="silver")
+            lines.append(t)
+        extra = len(raw) - len(shown)
+        if extra > 0:
+            t = Text("┃  │ ", style="gutter")
+            t.append(f"… +{extra} lines", style="dim")
+            lines.append(t)
+    return lines
 
 
 def render_banner(
@@ -145,36 +193,110 @@ def render_banner(
     title: str = "",
     out: Console | None = None,
 ) -> None:
+    """Launch card: logo + workspace facts. Compacts as the terminal narrows."""
     c = out or console
-    grid = Table.grid(expand=True)
-    grid.add_column(justify="left", ratio=1)
-    grid.add_column(justify="right", ratio=1)
-    left = Text()
-    left.append("Friday", style="bold cyan")
-    left.append("  AgentOS", style="dim")
-    if cwd:
-        left.append("  ")
-        left.append(cwd, style="bold white")
-    if branch:
-        left.append("  ")
-        left.append(branch, style="green")
-    right = f"[dim]{model}[/dim]  [green]{mode}[/green]"
-    grid.add_row(left, right)
-    meta = Text()
-    if session_id:
-        meta.append("session ", style="dim")
-        meta.append(session_id, style="bold")
-    if title:
+    width = term_cols(c)
+
+    if width < 52:
+        line = Text()
+        line.append("Friday", style="bold white")
+        if cwd:
+            line.append("  ")
+            line.append(cwd, style="white")
+        if branch:
+            line.append("  ")
+            line.append(branch, style="bold #00ff00")
         if session_id:
-            meta.append("  ·  ", style="dim")
-        meta.append(title, style="dim")
-    body: Any = Group(grid, meta) if meta.plain else grid
-    c.print(Panel(body, border_style="cyan", padding=(0, 1)))
-    c.print("[dim]/new  /resume  /exit  /help  ·  type / for commands and skills[/dim]\n")
+            line.append("  ")
+            line.append(session_id, style="dim #8b8b90")
+        line.append("  ")
+        line.append(mode, style="bold #e0af68")
+        if model:
+            short = model.split("/")[-1] if "/" in model else model
+            line.append("  ")
+            line.append(short, style="dim #8b8b90")
+        c.print(line)
+        c.print()
+        return
+
+    info_grid = Table.grid(expand=True)
+    info_grid.add_column(justify="left", ratio=1, overflow="ellipsis")
+
+    top_line = Text()
+    top_line.append("Friday AgentOS", style="bold white")
+    top_line.append("  v0.1.0", style="dim #8b8b90")
+    if session_id:
+        top_line.append("  ·  ", style="dim #6c6c6c")
+        top_line.append(f"session {session_id}", style="dim #8b8b90")
+    if title and width >= 72:
+        top_line.append(f" ({title})", style="dim #6c6c6c")
+    info_grid.add_row(top_line)
+
+    headline = Text()
+    headline.append("Agent kernel ready", style="bold #e0af68")
+    headline.append(f" in {mode} mode", style="bold white")
+    info_grid.add_row(headline)
+
+    meta_line = Text()
+    if cwd:
+        meta_line.append(cwd, style="white")
+    if branch:
+        if cwd:
+            meta_line.append("  ·  ", style="dim #6c6c6c")
+        meta_line.append(f"git:{branch}", style="bold #00ff00")
+    if model:
+        if cwd or branch:
+            meta_line.append("  ·  ", style="dim #6c6c6c")
+        meta_line.append(model, style="dim #8b8b90")
+    info_grid.add_row(meta_line)
+
+    menu_table = Table.grid(padding=(0, 2))
+    menu_table.add_column(style="white", overflow="ellipsis")
+    menu_table.add_column(style="dim #6c6c6c", overflow="ellipsis")
+    menu_table.add_row("◆ New session", "/new")
+    menu_table.add_row("◆ Resume session", "/resume")
+    if width >= 64:
+        menu_table.add_row("◆ Keyboard shortcuts", "Ctrl+X / /shortcuts")
+        menu_table.add_row("◆ Agent dials & skills", "/mode · /skills · /settings")
+    menu_table.add_row("◆ Exit Friday", "/exit")
+    info_grid.add_row(Text())
+    info_grid.add_row(menu_table)
+
+    if width < 78:
+        body: RenderableType = info_grid
+    else:
+        logo_text = Text()
+        for row in FRIDAY_BRAILLE_LOGO:
+            logo_text.append(row + "\n", style="bold #e0af68")
+        card_grid = Table.grid(expand=True, padding=(0, 2))
+        card_grid.add_column(width=18, justify="center", no_wrap=True)
+        card_grid.add_column(justify="left", ratio=1, overflow="ellipsis")
+        card_grid.add_row(logo_text, info_grid)
+        body = card_grid
+
+    c.print(
+        Panel(
+            body,
+            border_style="#505050",
+            padding=(1, 1 if width < 78 else 2),
+            expand=False,
+            width=min(width, 100),
+        )
+    )
+    if width >= 64:
+        c.print(
+            "[dim #8b8b90]Shift+Tab cycles Code / Architect / Ask / Fast · "
+            "Ctrl+X shortcuts[/dim #8b8b90]\n"
+        )
+    else:
+        c.print()
 
 
 def display_user_content(content: str) -> str:
-    """Collapse a stored skill turn back to `/name args` for the transcript."""
+    """Collapse stored skill turns and @file attachments for the transcript."""
+    from ui.mentions import strip_attachments
+
+    content = strip_attachments(content)
     if not content.startswith("[skill:"):
         return content
     first, _, _rest = content.partition("\n")
@@ -195,7 +317,7 @@ def render_history(history: list[dict[str, Any]], out: Console | None = None) ->
         if role == "user":
             render_user(display_user_content(content), out=c)
         elif role == "assistant" and content.strip():
-            c.print("[banner]friday[/banner]")
+            c.print("[bold #e0af68]Friday[/bold #e0af68]")
             c.print(Markdown(content))
             c.print()
 
@@ -203,46 +325,104 @@ def render_history(history: list[dict[str, Any]], out: Console | None = None) ->
 def render_user(text: str, out: Console | None = None) -> None:
     c = out or console
     c.print()
-    c.print("[you]you[/you]")
-    c.print(text)
+    line = Text()
+    line.append("❯ ", style="bold #8db0ff")
+    line.append(text, style="white")
+    c.print(line)
 
 
 def render_card(ev: dict[str, Any], out: Console | None = None) -> None:
+    """Left-border permission card. Inline y/n is the live path; /approve remains."""
     c = out or console
+    width = term_cols(c)
     cid = ev.get("id", "unknown")
     ring = ev.get("ring", 2)
     action = ev.get("action_preview", "")
     reason = ev.get("reason", "Host mutation requires permission")
+    inner = max(16, width - 12)
+
     body = Text()
-    body.append(str(action) + "\n", style="bold")
-    body.append(str(reason), style="dim")
-    body.append("\n\n")
-    body.append("y allow", style="bold green")
-    body.append("   ", style="dim")
-    body.append("n deny", style="bold red")
-    body.append(f"   /approve {cid}  /deny {cid}", style="dim")
+    accent = "bold #f38ba8" if int(ring) >= 2 else "bold #e0af68"
+    body.append("┃  ◆ Permission request", style=accent)
+    body.append(f"  ring {ring}\n", style=accent)
+    body.append("┃  Action:  ", style="dim #8b8b90")
+    body.append(f"{str(action)[:inner]}\n", style="bold white")
+    body.append("┃  Reason:  ", style="dim #8b8b90")
+    body.append(f"{str(reason)[:inner]}\n\n", style="italic #c0c0c0")
+    body.append("┃  (●) 1. Allow               ", style="bold #00ff00")
+    body.append(f"[y / /approve {cid}]\n", style="dim #6c6c6c")
+    body.append("┃  (○) 2. Deny                ", style="bold #f38ba8")
+    body.append(f"[n / /deny {cid}]", style="dim #6c6c6c")
+
     c.print(
         Panel(
             body,
-            title=f"card {cid}  ·  ring {ring}",
-            border_style="red" if int(ring) >= 2 else "yellow",
+            title=f"card {cid} · ring {ring}",
+            border_style="#f38ba8" if int(ring) >= 2 else "#e0af68",
+            padding=(0, 1),
+            expand=width >= 60,
+        )
+    )
+
+
+def render_plan(
+    filename: str = "plan.md",
+    lines: list[str] | None = None,
+    status: str = "",
+    out: Console | None = None,
+) -> None:
+    """Print workspace plan.md when it exists. Does not invent a plan."""
+    c = out or console
+    if not lines:
+        c.print(f"[dim #8b8b90]No {filename} in the workspace.[/dim #8b8b90]")
+        return
+
+    width = term_cols(c)
+    inner = max(16, width - 10)
+    content = Text()
+    for idx, raw in enumerate(lines[:80], 1):
+        content.append(f"{idx:3d} │ ", style="dim #6c6c6c")
+        content.append(f"{raw[:inner]}\n", style="white")
+    if len(lines) > 80:
+        content.append(f"    │ … +{len(lines) - 80} lines\n", style="dim #6c6c6c")
+
+    header = Text()
+    header.append("◆ ", style="bold #e0af68")
+    header.append(status or filename, style="bold #e0af68")
+    c.print(
+        Panel(
+            Group(header, Text(), content),
+            title=filename,
+            border_style="#e0af68",
             padding=(0, 1),
         )
     )
 
 
+def render_shortcuts() -> None:
+    from ui.dialogs import show_shortcuts_dialog
+
+    show_shortcuts_dialog()
+
+
 def render_tool_call(tool_name: str, args: dict[str, Any], ring: int = 1) -> None:
-    console.print(_tool_heading(tool_name, args, ring, "running"))
+    console.print(_tool_heading(tool_name, args, ring, "running", width=term_cols()))
 
 
-def render_facts(facts: list[dict[str, Any]]) -> None:
+def render_facts(facts: list[dict[str, Any]], out: Console | None = None) -> None:
+    c = out or console
     if not facts:
-        console.print("[dim]No confirmed long-term facts in memory.[/dim]")
+        c.print("[dim #8b8b90]No confirmed long-term facts in memory.[/dim #8b8b90]")
         return
-    table = Table(title="Confirmed facts", border_style="cyan", header_style="bold cyan")
-    table.add_column("ID", style="dim", width=8)
-    table.add_column("Fact", style="white")
-    table.add_column("Confidence", style="green", width=12, justify="center")
+    table = Table(
+        title="◆ Confirmed Facts",
+        border_style="#505050",
+        header_style="bold #e0af68",
+        expand=True,
+    )
+    table.add_column("ID", style="dim #8b8b90", min_width=6, max_width=10)
+    table.add_column("Fact", style="white", ratio=4, overflow="fold")
+    table.add_column("Confidence", style="bold #00ff00", min_width=8, justify="center")
     for f in facts:
         conf = f.get("confidence", 1.0)
         table.add_row(
@@ -250,80 +430,125 @@ def render_facts(facts: list[dict[str, Any]]) -> None:
             str(f.get("statement", "")),
             f"{conf:.0%}" if isinstance(conf, (int, float)) else str(conf),
         )
-    console.print(table)
+    c.print(table)
 
 
-def render_proposals(proposals: list[dict[str, Any]]) -> None:
+def render_proposals(proposals: list[dict[str, Any]], out: Console | None = None) -> None:
+    c = out or console
     if not proposals:
-        console.print("[dim]No pending Librarian proposals.[/dim]")
+        c.print("[dim #8b8b90]No pending Librarian proposals.[/dim #8b8b90]")
         return
-    table = Table(title="Pending proposals", border_style="yellow", header_style="bold yellow")
-    table.add_column("ID", style="dim", width=8)
-    table.add_column("Kind", style="magenta", width=12)
-    table.add_column("Preview", style="white")
+    table = Table(
+        title="◆ Pending Librarian Proposals",
+        border_style="#505050",
+        header_style="bold #e0af68",
+        expand=True,
+    )
+    table.add_column("ID", style="dim #8b8b90", min_width=6, max_width=10)
+    table.add_column("Kind", style="bold #8db0ff", min_width=8, max_width=12)
+    table.add_column("Preview", style="white", ratio=4, overflow="fold")
     for p in proposals:
         payload = p.get("payload", {})
         preview = payload.get("statement") or payload.get("name") or str(payload)
         table.add_row(str(p.get("id", "")), str(p.get("kind", "")), str(preview))
-    console.print(table)
-    console.print("[dim]Approve with /approve <id> or /approve all[/dim]")
+    c.print(table)
+    c.print(
+        "[dim #8b8b90]Approve with [bold white]/approve <id>[/bold white] "
+        "or [bold white]/approve all[/bold white][/dim #8b8b90]"
+    )
 
 
-def render_tasks(tasks: list[Any]) -> None:
+def render_tasks(tasks: list[Any], out: Console | None = None) -> None:
+    c = out or console
     if not tasks:
-        console.print("[dim]No tasks in queue.[/dim]")
+        c.print("[dim #8b8b90]No tasks in queue.[/dim #8b8b90]")
         return
-    table = Table(title="Tasks", border_style="blue", header_style="bold blue")
-    table.add_column("ID", style="dim", width=8)
-    table.add_column("Status", style="bold", width=14)
-    table.add_column("Title", style="white")
+    table = Table(
+        title="◆ Agent Tasks",
+        border_style="#505050",
+        header_style="bold #e0af68",
+        expand=True,
+    )
+    table.add_column("ID", style="dim #8b8b90", min_width=6, max_width=10)
+    table.add_column("Status", style="bold", min_width=10, max_width=16)
+    table.add_column("Title", style="white", ratio=3, overflow="fold")
     status_styles = {
-        "running": "[bold green]running[/bold green]",
-        "queued": "[yellow]queued[/yellow]",
-        "done": "[dim]done[/dim]",
-        "failed": "[bold red]failed[/bold red]",
-        "stuck": "[bold yellow]stuck[/bold yellow]",
-        "waiting_approval": "[bold red]card[/bold red]",
+        "running": "[bold #00ff00]running[/bold #00ff00]",
+        "queued": "[bold #e0af68]queued[/bold #e0af68]",
+        "done": "[dim #8b8b90]done[/dim #8b8b90]",
+        "failed": "[bold #f38ba8]failed[/bold #f38ba8]",
+        "stuck": "[bold #e0af68]stuck[/bold #e0af68]",
+        "waiting_approval": "[bold #f38ba8]card[/bold #f38ba8]",
     }
     for t in tasks:
         st = getattr(t, "status", "unknown")
         table.add_row(str(getattr(t, "id", "")), status_styles.get(st, st), str(getattr(t, "title", "")))
-    console.print(table)
+    c.print(table)
 
 
-def render_roles(roles_cfg: dict[str, Any]) -> None:
+def render_roles(roles_cfg: dict[str, Any], out: Console | None = None) -> None:
+    c = out or console
     if not roles_cfg:
-        console.print("[dim]No roles configured.[/dim]")
+        c.print("[dim #8b8b90]No roles configured.[/dim #8b8b90]")
         return
-    table = Table(title="Model roles", border_style="magenta", header_style="bold magenta")
-    table.add_column("Role", style="cyan", width=15)
-    table.add_column("Model", style="bold white")
+    table = Table(
+        title="◆ Model Roles",
+        border_style="#505050",
+        header_style="bold #e0af68",
+        expand=True,
+    )
+    table.add_column("Role", style="bold #8db0ff", min_width=8, max_width=16)
+    table.add_column("Model", style="bold white", overflow="fold")
     for role, model_id in roles_cfg.items():
         table.add_row(str(role), str(model_id))
-    console.print(table)
+    c.print(table)
 
 
-def render_settings(kernel_cfg: dict[str, Any], perm_cfg: dict[str, Any]) -> None:
-    table = Table(title="Runtime settings", border_style="cyan", header_style="bold cyan")
-    table.add_column("Setting", style="cyan")
-    table.add_column("Value", style="bold white")
-    table.add_column("What it does", style="dim")
+def render_settings(
+    kernel_cfg: dict[str, Any],
+    perm_cfg: dict[str, Any],
+    out: Console | None = None,
+) -> None:
+    c = out or console
+    table = Table(
+        title="◆ Runtime Settings",
+        border_style="#505050",
+        header_style="bold #e0af68",
+        expand=True,
+    )
+    table.add_column("Setting", style="bold #8db0ff", min_width=12, max_width=22)
+    table.add_column("Value", style="bold white", min_width=8, max_width=18)
+    table.add_column("What it does", style="dim #8b8b90", overflow="fold")
     table.add_row("clarify", str(kernel_cfg.get("clarify", True)), "Pre-turn ambiguity checker")
     table.add_row("max_tool_steps", str(kernel_cfg.get("max_tool_steps", 8)), "Chained tool calls per turn")
     table.add_row("concurrent_slots", str(kernel_cfg.get("concurrent_slots", 4)), "Background task slots")
-    table.add_row("skill_autonomy", str(perm_cfg.get("skill_autonomy", "suggest_only")), "Self-created skill autonomy")
-    console.print(table)
+    table.add_row(
+        "skill_autonomy",
+        str(perm_cfg.get("skill_autonomy", "suggest_only")),
+        "Self-created skill autonomy",
+    )
+    c.print(table)
 
 
-def render_sessions(rows: list[dict[str, Any]], current_id: str = "") -> None:
+def render_sessions(
+    rows: list[dict[str, Any]],
+    current_id: str = "",
+    out: Console | None = None,
+) -> None:
+    c = out or console
     if not rows:
-        console.print("[dim]No saved sessions. This one starts empty.[/dim]")
+        c.print("[dim #8b8b90]No saved sessions. This one starts empty.[/dim #8b8b90]")
         return
-    table = Table(title="Sessions", border_style="cyan", header_style="bold cyan")
-    table.add_column("ID", style="dim", width=10)
-    table.add_column("Updated", style="white", width=20)
-    table.add_column("Mode", style="green", width=10)
-    table.add_column("Title", style="white")
+    table = Table(
+        title="◆ Saved Sessions",
+        border_style="#505050",
+        header_style="bold #e0af68",
+        expand=True,
+    )
+    table.add_column("ID", style="dim #8b8b90", min_width=8, max_width=12)
+    table.add_column("Updated", style="white", min_width=12, max_width=20)
+    table.add_column("Mode", style="bold #00ff00", min_width=6, max_width=12)
+    table.add_column("Title", style="white", overflow="fold")
     for row in rows:
         sid = str(row.get("id", ""))
         marker = "● " if sid == current_id else "  "
@@ -333,12 +558,25 @@ def render_sessions(rows: list[dict[str, Any]], current_id: str = "") -> None:
             str(row.get("mode", "")),
             str(row.get("title") or "(untitled)"),
         )
-    console.print(table)
-    console.print("[dim]/resume to pick one · /resume <id> to load · /new for a blank conversation[/dim]")
+    c.print(table)
+    c.print(
+        "[dim #8b8b90]/resume to pick one · /resume <id> to load · "
+        "/new for a blank conversation[/dim #8b8b90]"
+    )
+
+
+class _LiveStatus:
+    """Renderable that re-reads TurnRenderer each Live refresh so the spinner moves."""
+
+    def __init__(self, renderer: "TurnRenderer") -> None:
+        self.renderer = renderer
+
+    def __rich_console__(self, _console: Console, _options):
+        yield self.renderer._status_renderable()
 
 
 class TurnRenderer:
-    """Thinking accordion, tool rows, markdown reply, turn footer."""
+    """Live thinking spinner, in-place tool rows, markdown reply, turn footer."""
 
     def __init__(self, out: Optional[Console] = None) -> None:
         self.console = out or console
@@ -353,9 +591,93 @@ class TurnRenderer:
         self._live: Optional[Live] = None
         self._live_kind: str = ""
         self._think_announced = False
+        self._think_closed = False
         self._open_tools: list[dict[str, Any]] = []
         self._tag_rest = ""
         self._pending_block = ""
+
+    def _width(self) -> int:
+        return term_cols(self.console)
+
+    def _use_live(self) -> bool:
+        try:
+            return bool(self.console.is_terminal)
+        except Exception:
+            return False
+
+    def _running_tool(self) -> dict[str, Any] | None:
+        return next((t for t in reversed(self._open_tools) if "done" not in t), None)
+
+    def _status_renderable(self) -> Text:
+        elapsed = time.time() - (self._think_started or self.start_time or time.time())
+        frame = SPIN[int(elapsed * 10) % len(SPIN)]
+        width = self._width()
+        if self._live_kind == "think":
+            line = Text()
+            line.append(f"{frame} ", style="spinner")
+            line.append("Thinking… ", style="thought")
+            line.append(fmt_duration(elapsed), style="thought_dim")
+            return line
+        running = self._running_tool()
+        if self._live_kind == "tool" and running:
+            return _tool_heading(
+                running["name"],
+                running["args"],
+                running["ring"],
+                f"running {fmt_duration(time.time() - running['t0'])}",
+                width=width,
+            )
+        return Text("")
+
+    def _start_live(self, kind: str) -> None:
+        self._live_kind = kind
+        if not self._use_live():
+            if kind == "think" and not self._think_announced:
+                self.console.print("[thought]Thinking…[/thought]")
+                self._think_announced = True
+            elif kind == "tool":
+                running = self._running_tool()
+                if running and not running.get("printed_run"):
+                    self.console.print(
+                        _tool_heading(
+                            running["name"],
+                            running["args"],
+                            running["ring"],
+                            "running",
+                            width=self._width(),
+                        )
+                    )
+                    running["printed_run"] = True
+            return
+        try:
+            if self._live is None:
+                self._live = Live(
+                    _LiveStatus(self),
+                    console=self.console,
+                    refresh_per_second=10,
+                    transient=True,
+                    vertical_overflow="crop",
+                )
+                self._live.start()
+            else:
+                self._live.update(_LiveStatus(self))
+        except Exception:
+            self._live = None
+            self._live_kind = ""
+            if kind == "think" and not self._think_announced:
+                self.console.print("[thought]Thinking…[/thought]")
+                self._think_announced = True
+
+    def _stop_live(self) -> None:
+        live = self._live
+        self._live = None
+        self._live_kind = ""
+        if live is None:
+            return
+        try:
+            live.stop()
+        except Exception:
+            pass
 
     def begin_turn(self) -> None:
         self.finish()
@@ -371,71 +693,81 @@ class TurnRenderer:
         self._open_tools = []
         self._tag_rest = ""
         self._think_announced = False
-        self._open_think()
+        self._think_closed = False
 
     def on_thinking(self) -> None:
         if not self._active:
             self.begin_turn()
-        elif not self._live_kind:
-            self._open_think()
+        if not self._think_announced and not self._think_closed:
+            self._start_live("think")
+            self._think_announced = True
 
     def on_token(self, token: str) -> None:
         if not self._active:
             self.begin_turn()
         for kind, piece in self._split_think(token):
             if kind == "think":
-                if self._live_kind != "think" and not self.think_buffer:
-                    if not self._think_started:
-                        self._think_started = time.time()
-                    self._open_think()
+                if not self._think_started:
+                    self._think_started = time.time()
                 self.think_buffer += piece
-                self._paint_think()
+                if not self._think_announced and not self._think_closed:
+                    self._start_live("think")
+                    self._think_announced = True
             elif piece:
-                if self.think_buffer or self._live_kind == "think":
+                if (self.think_buffer or self._think_announced) and not self._think_closed:
                     self._close_think()
                 self.streamed_text += piece
                 self._pending_block += piece
                 blocks, self._pending_block = _extract_completed_blocks(self._pending_block)
-                if blocks:
-                    self._stop_live()
-                    for b in blocks:
-                        self.console.print(Markdown(b))
-                if self._pending_block.strip():
-                    self._paint_draft(self._pending_block)
+                for b in blocks:
+                    self.console.print(Markdown(b))
 
     def on_tool_call(self, tool_name: str, args: dict[str, Any], ring: int = 1) -> None:
         if not self._active:
             self.begin_turn()
         self._close_think()
-        self._stop_live()
         if self._pending_block.strip():
             self.console.print(Markdown(self._pending_block.strip()))
             self._pending_block = ""
         self.tool_count += 1
-        self._open_tools.append({"name": tool_name, "args": args, "ring": ring, "t0": time.time()})
-        self.console.print(_tool_heading(tool_name, args, ring, "running"))
+        self._open_tools.append(
+            {"name": tool_name, "args": args or {}, "ring": ring, "t0": time.time()}
+        )
+        self._start_live("tool")
+        self._think_closed = False
+        self._think_announced = False
+        self._think_started = time.time()
 
     def on_tool_result(self, name: str, result: str = "") -> None:
+        self._stop_live()
         started = next((t for t in reversed(self._open_tools) if t["name"] == name and "done" not in t), None)
         elapsed = time.time() - started["t0"] if started else 0.0
         if started:
             started["done"] = True
         ring = int(started["ring"]) if started else 1
         args = started["args"] if started else {}
-        self.console.print(_tool_heading(name, args, ring, f"done {fmt_duration(elapsed)}"))
-        preview = " ".join((result or "").split())
-        if preview:
-            self.console.print(_gutter_preview(preview))
+        width = self._width()
+        suffix = f"done {fmt_duration(elapsed)}"
+        if (result or "").strip().lower() == "denied":
+            suffix = f"denied {fmt_duration(elapsed)}"
+        self.console.print(_tool_heading(name, args, ring, suffix, width=width))
+        for line in _write_preview(args, result, width):
+            self.console.print(line)
 
     def on_card(self) -> None:
+        self._stop_live()
         self.card_count += 1
 
     def on_stuck(self, question: str) -> None:
+        self._close_think()
+        if self._pending_block.strip():
+            self.console.print(Markdown(self._pending_block.strip()))
+            self._pending_block = ""
         self.console.print(
             Panel(
-                f"[bold yellow]Friday is stuck:[/bold yellow] {question}",
+                f"[bold #e0af68]Friday is stuck:[/bold #e0af68] {question}",
                 title="needs clarification",
-                border_style="yellow",
+                border_style="#e0af68",
             )
         )
 
@@ -444,20 +776,18 @@ class TurnRenderer:
 
     def finish(self) -> None:
         if not self._active:
-            self._stop_live()
             return
         self._close_think()
-        self._stop_live()
         if self._pending_block.strip():
             self.console.print(Markdown(self._pending_block.strip()))
             self._pending_block = ""
         elapsed = time.time() - (self.start_time or time.time())
-        bits = [fmt_duration(elapsed)]
+        bits = [f"◆ {fmt_duration(elapsed)}"]
         if self.tool_count:
             bits.append(f"{self.tool_count} tool" + ("s" if self.tool_count != 1 else ""))
         if self.card_count:
             bits.append(f"{self.card_count} card" + ("s" if self.card_count != 1 else ""))
-        self.console.print(Rule(style="rule"))
+        self.console.print(Rule(style="#404040"))
         self.console.print(f"[footer]{' · '.join(bits)}[/footer]")
         self.console.print()
         self._active = False
@@ -466,6 +796,8 @@ class TurnRenderer:
         self._in_tag = False
         self._tag_rest = ""
         self._pending_block = ""
+        self._think_announced = False
+        self._think_closed = False
 
     def _split_think(self, token: str) -> list[tuple[str, str]]:
         data = self._tag_rest + token
@@ -481,7 +813,7 @@ class TurnRenderer:
                     self._tag_rest = data
                     break
                 out.append(("think", data[:end]))
-                data = data[end + len("</think>"):]
+                data = data[end + len("</think>") :]
                 self._in_tag = False
                 continue
             start = data.find("<think>")
@@ -493,114 +825,44 @@ class TurnRenderer:
                 break
             if start:
                 out.append(("text", data[:start]))
-            data = data[start + len("<think>"):]
+            data = data[start + len("<think>") :]
             self._in_tag = True
         return out
 
-    def _open_think(self) -> None:
-        if self._live_kind == "think":
-            return
-        self._stop_live()
-        body = self._think_renderable()
-        if self._start_live(body, kind="think", transient=True):
-            return
-        if not self._think_announced:
-            self.console.print("[thought]thinking[/thought]")
-            self._think_announced = True
-
-    def _paint_think(self) -> None:
-        if self._live_kind == "think" and self._live:
-            self._live.update(self._think_renderable())
-        elif self.console.is_terminal and not self._live:
-            self.console.print(Text(self.think_buffer[-80:], style="thought"), end="\r")
-
     def _close_think(self) -> None:
-        had = bool(self.think_buffer.strip())
+        self._stop_live()
+        if self._think_closed:
+            return
+        had = bool(self.think_buffer.strip()) or self._think_announced
         elapsed = time.time() - (self._think_started or self.start_time or time.time())
-        think_live = self._live_kind == "think"
-        if think_live:
-            self._stop_live()
         if had:
-            self.console.print(f"[thought]💭 thought {fmt_duration(elapsed)}[/thought]")
+            self.console.print(f"[thought]◆ thought {fmt_duration(elapsed)}[/thought]")
         self.think_buffer = ""
         self._think_started = 0.0
         self._think_announced = False
-
-    def _think_renderable(self) -> Group:
-        elapsed = time.time() - (self._think_started or self.start_time or time.time())
-        header = Text()
-        header.append("⠋ ", style="spinner")
-        header.append(f"thinking {fmt_duration(elapsed)}", style="thought")
-        # Show last ~4 lines of think buffer for context
-        tail = self.think_buffer[-600:] if self.think_buffer else "…"
-        lines = tail.split("\n")
-        if len(lines) > 4:
-            lines = lines[-4:]
-        body = Text("\n".join(lines), style="thought")
-        return Group(header, body)
-
-    def _paint_draft(self, text: str) -> None:
-        md = Markdown(text)
-        if self._live_kind == "draft" and self._live:
-            self._live.update(md)
-            return
-        if self._start_live(md, kind="draft", transient=True):
-            return
-
-    def _start_live(self, renderable: Any, *, kind: str, transient: bool) -> bool:
-        if not self.console.is_terminal:
-            return False
-        self._stop_live()
-        try:
-            self._live = Live(
-                renderable,
-                console=self.console,
-                refresh_per_second=8,
-                transient=transient,
-                vertical_overflow="crop",
-            )
-            self._live.start()
-            self._live_kind = kind
-            return True
-        except Exception:
-            self._live = None
-            self._live_kind = ""
-            return False
-
-    def _stop_live(self) -> None:
-        if self._live is not None:
-            try:
-                self._live.stop()
-            except Exception:
-                pass
-            self._live = None
-        self._live_kind = ""
+        self._think_closed = True
 
 
 def _extract_completed_blocks(buffer: str) -> tuple[list[str], str]:
-    """Split buffer into completed Markdown blocks (paragraphs, headers, code blocks)
-    and any incomplete trailing text."""
+    """Split buffer into completed Markdown blocks and any incomplete trailing text."""
     blocks: list[str] = []
     rest = buffer
     while rest:
-        # Check if we are inside a code block
         if rest.startswith("```"):
             end_cb = rest.find("\n```", 3)
             if end_cb != -1:
                 after = rest.find("\n", end_cb + 4)
                 if after != -1:
                     blocks.append(rest[:after].strip())
-                    rest = rest[after + 1:].lstrip("\n")
+                    rest = rest[after + 1 :].lstrip("\n")
                     continue
-                else:
-                    tail = rest[end_cb + 4:]
-                    if not tail.strip():
-                        blocks.append(rest.strip())
-                        rest = ""
-                        break
+                tail = rest[end_cb + 4 :]
+                if not tail.strip():
+                    blocks.append(rest.strip())
+                    rest = ""
+                    break
             break
 
-        # Check for paragraph boundary \n\n
         idx = rest.find("\n\n")
         if idx != -1:
             code_start = rest.find("```")
@@ -613,7 +875,7 @@ def _extract_completed_blocks(buffer: str) -> tuple[list[str], str]:
             block = rest[:idx].strip()
             if block:
                 blocks.append(block)
-            rest = rest[idx + 2:].lstrip("\n")
+            rest = rest[idx + 2 :].lstrip("\n")
             continue
 
         break

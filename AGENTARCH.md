@@ -88,7 +88,7 @@ Each unlocks only when Phase 2's harness shows the numbers: stage-2 auto-consoli
 
 ## Reference
 
-Harness layers (prompt, skill-on-demand, web research) are specified here. Voice and desktop stay later clients of the same bus; do not add a second brain.
+Harness layers (prompt, skill-on-demand, web research) are specified here. The plan that landed them is [HARNESS-PLAN.md](HARNESS-PLAN.md). Voice and desktop stay later clients of the same bus; do not add a second brain.
 
 ### Event contracts
 
@@ -98,11 +98,11 @@ Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`
 
 `python main.py --cli` is the Phase 1 interactive surface (`ui/`). It is a prompt loop, not a full-screen TUI.
 
-**Header.** The banner names the workspace directory (home abbreviated to `~`), the current git branch when the workspace is a repo (omitted otherwise; detached HEAD shows the short hash), the session id, model, and mode.
+**Header.** The banner names the workspace directory (home abbreviated to `~`), the current git branch when the workspace is a repo (omitted otherwise; detached HEAD shows the short hash), the session id, model, and mode. Below ~80 columns the logo drops; below ~52 columns the banner is a single line. Tables and the composer toolbar follow the current terminal width.
 
-**Transcript.** Each foreground turn prints: the user line; a thinking block (dim, collapsed to `thought <duration>` when the first non-thought token or tool arrives); one row per `tool.call` / `tool.result` (name, short args, **ring**, elapsed); the assistant reply as rendered markdown, not raw markers; a footer with wall-clock time, tool count, and **card** count. The CLI subscribes to `tool.call`, `tool.result`, and `approval.resolved` as well as `agent.state` / `approval.request` / `error`.
+**Transcript.** Each foreground turn prints: the user line (`❯` plus the text); a thinking spinner that collapses in place to `thought <duration>` when the first non-thought token or tool arrives; one row per tool (running is replaced by done: name, short args, **ring**, elapsed; `files` writes also show a short content preview); the assistant reply as rendered markdown, not raw markers; a footer with wall-clock time, tool count, and **card** count. The CLI subscribes to `tool.call`, `tool.result`, and `approval.resolved` as well as `agent.state` / `approval.request` / `error`. `/plan` prints workspace `plan.md` when that file exists; it does not invent a plan.
 
-**Composer.** Input is a framed text box (not a raw `>` prompt). Placeholder `message or /command`. Enter sends. The box is hidden during a foreground stream and redrawn after `idle` (or an error). Background **task** turns still run on the task manager and may print into the transcript while the prompt is idle. `patch_stdout` keeps those prints from eating the prompt. `/exit` (alias `/quit`) stops the process.
+**Composer.** Input is a framed text box (not a raw `>` prompt). Placeholder `message, @file, or /command`. Enter sends; Ctrl+J inserts a newline (Esc+Enter on non-Windows; on Windows Alt+Enter is the console fullscreen chord). Shift+Tab cycles Code / Architect / Ask / Fast. Ctrl+X opens shortcuts. Ctrl+Q exits (same as `/exit`). `@path` (Tab-complete from the workspace / `--root`) attaches that file's contents to the turn; the transcript keeps the `@path`, the model sees the body. Mentions are relative to the workspace and stay inside approved roots. The box is hidden during a foreground stream and redrawn after `idle` (or an error). On Windows, a focus change that does not alter columns/rows is not treated as a resize — those events used to reprint the inline frame a second time. Background **task** turns still run on the task manager and may print into the transcript while the prompt is idle. `patch_stdout` wraps the whole CLI loop so those prints do not eat the prompt. `/exit` (alias `/quit`) stops the process.
 
 **Cards.** A **card** raised during a foreground turn asks `y` allow / `n` deny inline (the main prompt is not up, so `/approve` would deadlock). `/approve` and `/deny` remain for background **tasks** and for anyone who skipped the inline prompt. Ring 0–1 tools still run silent.
 

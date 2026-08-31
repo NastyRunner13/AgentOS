@@ -12,13 +12,16 @@ from rich.console import Console
 from brain.openai_compat import _consume_openai_sse
 from brain.skills import Skill
 from ui.completer import FridayCommandCompleter, SLASH_COMMANDS, resolve_slash
+from ui.mentions import expand_mentions, mention_query, strip_attachments
 from ui.dialogs import (
     pick_session,
     show_mode_dialog,
     show_plugins_dialog,
     show_provider_dialog,
+    show_shortcuts_dialog,
     show_skills_dialog,
 )
+from ui.composer import size_changed
 from ui.renderer import (
     TurnRenderer,
     display_user_content,
@@ -27,13 +30,16 @@ from ui.renderer import (
     render_card,
     render_facts,
     render_history,
+    render_plan,
     render_proposals,
     render_roles,
     render_sessions,
     render_settings,
+    render_shortcuts,
     render_tasks,
     render_tool_call,
     render_user,
+    term_cols,
 )
 from ui.sessions import SessionStore
 from ui.workspace import display_cwd, git_branch
@@ -63,7 +69,7 @@ def test_completer_matches_root_slash_commands():
 
 
 def test_completer_includes_session_commands():
-    for cmd in ("/new", "/resume", "/sessions", "/rename", "/exit"):
+    for cmd in ("/new", "/resume", "/sessions", "/rename", "/exit", "/shortcuts", "/plan"):
         assert cmd in SLASH_COMMANDS
     completer = FridayCommandCompleter()
     texts = [m.text for m in completer.get_completions(Document(text="/re"), CompleteEvent())]
@@ -146,6 +152,8 @@ def test_resolve_slash_routes_builtins_and_skills(tmp_path: Path):
     assert resolve_slash("/new", skills) == ("command", "new", "")
     assert resolve_slash("/exit", skills) == ("command", "exit", "")
     assert resolve_slash("/resume abc", skills) == ("command", "resume", "abc")
+    assert resolve_slash("/shortcuts", skills) == ("command", "shortcuts", "")
+    assert resolve_slash("/plan", skills) == ("command", "plan", "")
     assert resolve_slash("/commit fix typo", skills) == ("skill", "commit", "fix typo")
     assert resolve_slash("/skill commit fix typo", skills) == ("skill", "commit", "fix typo")
     assert resolve_slash("/skill", skills) == ("command", "skills", "")
@@ -171,6 +179,26 @@ def test_render_banner_shows_directory_branch_and_session():
     assert "/exit" in out
 
 
+def test_render_banner_compacts_on_narrow_terminal():
+    buf = StringIO()
+    c = Console(file=buf, force_terminal=False, color_system=None, width=40, legacy_windows=False)
+    render_banner(
+        "claude-3-7-sonnet",
+        "Code",
+        cwd="~/AgentOS",
+        branch="main",
+        session_id="abc123",
+        title="list files",
+        out=c,
+    )
+    out = buf.getvalue()
+    assert "Friday" in out
+    assert "abc123" in out
+    assert "Code" in out
+    assert "New worktree" not in out
+    assert "always-approve" not in out.lower()
+
+
 def test_display_cwd_abbreviates_home(tmp_path: Path, monkeypatch):
     home = tmp_path / "home"
     proj = home / "work" / "AgentOS"
@@ -182,6 +210,40 @@ def test_display_cwd_abbreviates_home(tmp_path: Path, monkeypatch):
 
 def test_git_branch_outside_repo(tmp_path: Path):
     assert git_branch(tmp_path) == ""
+
+
+def test_mention_query_and_expand(tmp_path: Path):
+    (tmp_path / "AGENTARCH.md").write_text("# spec\nhello", encoding="utf-8")
+    (tmp_path / "brain").mkdir()
+    (tmp_path / "brain" / "master.py").write_text("class Master:\n    pass\n", encoding="utf-8")
+    assert mention_query("look at @AGE") == "AGE"
+    assert mention_query("look at @AGENTARCH.md") == "AGENTARCH.md"
+    assert mention_query("user@host.com") is None
+    assert mention_query("/help") is None
+    prompt = expand_mentions("read @AGENTARCH.md please", tmp_path)
+    assert "read @AGENTARCH.md please" in prompt
+    assert '<attached path="AGENTARCH.md">' in prompt
+    assert "# spec" in prompt
+    assert strip_attachments(prompt) == "read @AGENTARCH.md please"
+    missing = expand_mentions("see @nope.py", tmp_path)
+    assert "missing file" in missing
+    blocked = expand_mentions("open @.env", tmp_path)
+    assert "skipped secret file" in blocked
+
+
+def test_completer_matches_at_files(tmp_path: Path):
+    (tmp_path / "AGENTARCH.md").write_text("x", encoding="utf-8")
+    (tmp_path / "main.py").write_text("x", encoding="utf-8")
+    completer = FridayCommandCompleter(lambda: {"root": tmp_path})
+    texts = [m.text for m in completer.get_completions(Document(text="see @AGE"), CompleteEvent())]
+    assert "AGENTARCH.md" in texts
+    none = list(completer.get_completions(Document(text="hello"), CompleteEvent()))
+    assert none == []
+
+
+def test_display_user_content_strips_attachments():
+    raw = 'read @AGENTARCH.md\n\n<attached path="AGENTARCH.md">\n# spec\n</attached>'
+    assert display_user_content(raw) == "read @AGENTARCH.md"
 
 
 def test_display_user_content_collapses_skill_turn():
@@ -211,6 +273,19 @@ async def test_pick_session_empty_returns_none():
     assert await pick_session([]) is None
 
 
+async def test_pick_session_matches_id_prefix(monkeypatch):
+    class FakeSession:
+        async def prompt_async(self, *_a, **_k):
+            return "abc"
+
+    import ui.dialogs as dialogs
+
+    monkeypatch.setattr(dialogs, "render_sessions", lambda *a, **k: None)
+    monkeypatch.setattr("prompt_toolkit.PromptSession", lambda *a, **k: FakeSession())
+    rows = [{"id": "abc123", "title": "list files", "updated_at": "2026-01-01T00:00:00", "mode": "Code"}]
+    assert await pick_session(rows, "abc123") == "abc123"
+
+
 def test_render_functions_do_not_crash(tmp_path: Path):
     render_banner("claude-3-7-sonnet", "Code")
     render_card({"id": "c1", "ring": 2, "action_preview": "rm -rf", "reason": "delete"})
@@ -226,12 +301,17 @@ def test_render_functions_do_not_crash(tmp_path: Path):
     render_settings({"clarify": True, "max_tool_steps": 8, "concurrent_slots": 4}, {"skill_autonomy": "suggest_only"})
     render_sessions([{"id": "abc", "updated_at": "2026-01-01T00:00:00", "mode": "Code", "title": "hi"}], "abc")
     render_sessions([])
+    render_plan("plan.md", ["1. Step one", "2. Step two"])
+    render_plan("plan.md")
+    render_shortcuts()
     show_mode_dialog("Code")
+    show_shortcuts_dialog()
     show_provider_dialog(
         {"default_provider": "openrouter", "providers": {"openrouter": {"kind": "openrouter", "api_key_env": "KEY"}}}
     )
     show_skills_dialog(tmp_path)
     show_plugins_dialog()
+
 
 
 def test_fmt_duration():
@@ -252,7 +332,7 @@ def test_turn_renderer_streaming():
     renderer.on_idle()
     assert renderer.streamed_text == ""
     out = buf.getvalue()
-    assert "thought" in out
+    assert "thought" in out.lower()
     assert "Hello world!" in out
 
 
@@ -290,8 +370,9 @@ def test_turn_renderer_think_tags_split_across_tokens():
     assert "visible" in renderer.streamed_text
     renderer.finish()
     out = buf.getvalue()
-    assert "thought" in out
+    assert "thought" in out.lower()
     assert "visible" in out
+
 
 
 def test_turn_renderer_tools_and_footer():
@@ -354,3 +435,66 @@ async def test_openai_reasoning_is_wrapped_not_in_reply():
     assert text == "hello"
     assert tokens == ["<think>", "plan", "</think>", "hello"]
     assert calls == []
+
+
+def test_turn_renderer_deduplicates_thinking():
+    c, buf = _console()
+    tr = TurnRenderer(c)
+    tr.begin_turn()
+    tr.on_thinking()
+    tr.on_thinking()  # duplicate call
+    tr.on_token("<think>reasoning chunk 1</think>")
+    tr.on_token("<think>reasoning chunk 2</think>")
+    tr.on_token("Here is the answer")
+    tr.on_token(" to your question.")
+    tr.finish()
+    out = buf.getvalue()
+    assert out.count("Thinking…") == 1
+    assert out.lower().count("thought") >= 1
+    assert "Here is the answer" in out
+
+
+def test_turn_renderer_write_preview_shows_file_snippet():
+    c, buf = _console()
+    renderer = TurnRenderer(c)
+    renderer.begin_turn()
+    renderer.on_tool_call(
+        "files",
+        {"action": "write", "path": "hello.py", "content": "print('hi')\nprint('bye')\n"},
+        ring=1,
+    )
+    renderer.on_tool_result("files", "wrote hello.py")
+    renderer.finish()
+    out = buf.getvalue()
+    assert "files" in out
+    assert "write hello.py" in out
+    assert "wrote hello.py" in out
+    assert "print('hi')" in out
+
+
+def test_render_plan_without_file_does_not_invent_steps():
+    c, buf = _console()
+    render_plan("plan.md", out=c)
+    out = buf.getvalue()
+    assert "No plan.md" in out
+    assert "planned.txt" not in out
+    assert "approve" not in out.lower()
+
+
+def test_size_changed_ignores_noop_and_tiny_sizes():
+    class Size:
+        def __init__(self, columns, rows):
+            self.columns = columns
+            self.rows = rows
+
+    a = Size(120, 40)
+    assert size_changed(None, a) is True
+    assert size_changed(a, Size(120, 40)) is False
+    assert size_changed(a, Size(80, 40)) is True
+    assert size_changed(a, Size(0, 40)) is False
+    assert size_changed(a, None) is False
+
+
+def test_term_cols_reads_console_width():
+    c, _buf = _console()
+    assert term_cols(c) == 80

@@ -6,8 +6,16 @@ import argparse
 import asyncio
 import html
 import os
+import shutil
 import sys
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 
 import yaml
 from dotenv import load_dotenv
@@ -100,18 +108,21 @@ def boot(root: Path):
 
 
 HELP = """\
-[bold cyan]Friday commands[/bold cyan]
+[bold #e0af68]◆ Friday Commands & Shortcuts[/bold #e0af68]
   [bold white]/new[/bold white]                   Fresh conversation (saves the current one)
   [bold white]/resume [id][/bold white]           Pick a session, or load one by id
   [bold white]/sessions[/bold white]              List saved conversations
   [bold white]/rename <title>[/bold white]        Name the current session
+  [bold white]/shortcuts[/bold white]             Full keyboard shortcuts & command palette (Ctrl+X)
+  [bold white]/plan[/bold white]                  Inspect active plan review block
+  [bold white]@path[/bold white]                  Attach a workspace file (Tab completes)
   [bold white]/help[/bold white]                  This cheatsheet
   [bold white]/mode [name][/bold white]           Code, Architect, Ask, Fast
   [bold white]/provider[/bold white]              Configured LLM providers
   [bold white]/skills[/bold white]                Active skills
   [bold white]/skill <name> [args][/bold white]   Run a skill (also /<name>)
-  [bold white]/plugins[/bold white]               Tools
-  [bold white]/settings[/bold white]              Runtime dials
+  [bold white]/plugins[/bold white]               Tools & ring specifications
+  [bold white]/settings[/bold white]              Runtime dials (clarify, slots, etc.)
   [bold white]/task <title> <prompt>[/bold white] Background turn (steer-able)
   [bold white]/steer <id> <text>[/bold white]     Inject guidance into a running task
   [bold white]/tasks[/bold white]                 Running and queued tasks
@@ -122,17 +133,21 @@ HELP = """\
   [bold white]/proposals[/bold white]             Pending Librarian drafts
   [bold white]/consolidate[/bold white]           Librarian consolidation draft
   [bold white]/roles[/bold white]                 Model role assignments
-  [bold white]/clear[/bold white]                 Clear the screen (does not start a new session)
+  [bold white]/clear[/bold white]                 Clear the screen
   [bold white]/reload[/bold white]                Reread YAML configs without restart
   [bold white]/exit[/bold white]                  Stop the CLI (alias /quit)
 """
 
 
-def _create_prompt_session(stack_getter, get_toolbar, get_title, history_path: Path):
+def _create_prompt_session(
+    stack_getter, get_toolbar, get_title, history_path: Path, on_cycle_mode=None
+):
     """Framed composer, or a two-line PromptSession if the box cannot start."""
     from ui.composer import create_composer
 
-    box = create_composer(stack_getter, get_toolbar, get_title, history_path)
+    box = create_composer(
+        stack_getter, get_toolbar, get_title, history_path, on_cycle_mode=on_cycle_mode
+    )
     if box is not None:
         return box
     if not sys.stdin.isatty():
@@ -144,9 +159,9 @@ def _create_prompt_session(stack_getter, get_toolbar, get_title, history_path: P
         from ui.completer import FridayCommandCompleter
 
         style = Style.from_dict({
-            "bottom-toolbar": "#cdd6f4 bg:#1e1e2e",
-            "bottom-toolbar.text": "#cdd6f4",
-            "placeholder": "#6c7086 italic",
+            "bottom-toolbar": "#e1e1e1 bg:#161618",
+            "bottom-toolbar.text": "#e1e1e1",
+            "placeholder": "#6c6c6c italic",
         })
         history_path.parent.mkdir(parents=True, exist_ok=True)
         return PromptSession(
@@ -156,6 +171,7 @@ def _create_prompt_session(stack_getter, get_toolbar, get_title, history_path: P
             history=FileHistory(str(history_path)),
             complete_while_typing=True,
             reserve_space_for_menu=8,
+            erase_when_done=True,
         )
     except Exception:
         return None
@@ -169,16 +185,16 @@ def _friday_prompt(store, mode: str, cwd: str = "", branch: str = ""):
     mode_s = html.escape(mode)
     cwd_s = html.escape(cwd)
     branch_bit = (
-        f' <style fg="#a6e3a1">{html.escape(branch)}</style>' if branch else ""
+        f' <style fg="#00ff00">{html.escape(branch)}</style>' if branch else ""
     )
     cwd_bit = f" <b>{cwd_s}</b>" if cwd_s else " <b>Friday</b>"
     return HTML(
-        f'<style fg="#89b4fa">╭─</style>{cwd_bit}'
+        f'<style fg="#505050">╭─</style>{cwd_bit}'
         f"{branch_bit}"
-        f' <style fg="#6c7086">{sid}</style>'
-        f' <style fg="#a6e3a1">{mode_s}</style>'
-        f' <style fg="#6c7086">{title}</style>\n'
-        f'<style fg="#89b4fa">│</style> '
+        f' <style fg="#8b8b90">{sid}</style>'
+        f' <style fg="#e0af68">{mode_s}</style>'
+        f' <style fg="#8b8b90">{title}</style>\n'
+        f'<style fg="#505050">│</style> '
     )
 
 
@@ -201,16 +217,19 @@ async def run_cli(root: Path) -> None:
         render_card,
         render_facts,
         render_history,
+        render_plan,
         render_proposals,
         render_roles,
         render_sessions,
         render_settings,
+        render_shortcuts,
         render_tasks,
         render_user,
         resolve_slash,
         show_mode_dialog,
         show_plugins_dialog,
         show_provider_dialog,
+        show_shortcuts_dialog,
         show_skills_dialog,
     )
     import ui.renderer as ui_renderer
@@ -249,9 +268,13 @@ async def run_cli(root: Path) -> None:
             store.save(master.history, current_mode)
 
     def on_tool_call(ev: dict) -> None:
+        if ev.get("task_id") and ui_state["foreground"]:
+            return
         renderer.on_tool_call(ev.get("name") or "", ev.get("args") or {}, int(ev.get("ring") or 1))
 
     def on_tool_result(ev: dict) -> None:
+        if ev.get("task_id") and ui_state["foreground"]:
+            return
         renderer.on_tool_result(ev.get("name") or "", ev.get("result") or "")
 
     async def on_card(ev: dict) -> None:
@@ -329,7 +352,9 @@ async def run_cli(root: Path) -> None:
         if HTML is None:
             return None
         try:
+            cols = shutil.get_terminal_size(fallback=(100, 24)).columns
             m_model = html.escape(str(stack["models_cfg"].get("roles", {}).get("master", "default")))
+            short_model = m_model.split("/")[-1] if "/" in m_model else m_model
             mem = stack.get("memory")
             facts_cnt = len(mem.valid_facts()) if mem else 0
             prop_cnt = len(mem.pending()) if mem else 0
@@ -337,53 +362,96 @@ async def run_cli(root: Path) -> None:
             tsks = stack.get("tasks")
             running_cnt = len([t for t in tsks.tasks.values() if t.status == "running"]) if tsks else 0
             cwd_s, branch_s = workspace_bits()
+            short_cwd = cwd_s.split("/")[-1] if "/" in cwd_s else (cwd_s.split("\\")[-1] if "\\" in cwd_s else cwd_s)
             card_bit = (
-                f" <style fg='ansired'><b>\U0001f534 {cards} cards</b></style> \u2502"
+                f" <style fg='#f38ba8'><b>● {cards} cards</b></style> │"
                 if cards
                 else ""
             )
             task_bit = (
-                f" <style fg='ansigreen'>\u25cf {running_cnt} tasks</style> \u2502"
+                f" <style fg='#00ff00'>● {running_cnt} tasks</style> │"
                 if running_cnt
-                else f" \u2699 {running_cnt} tasks \u2502"
+                else f" ⚙ {running_cnt} tasks │"
             )
             branch_bit = (
-                f" <style fg='#a6e3a1'>{html.escape(branch_s)}</style> \u2502"
+                f" <style fg='#00ff00'>git:{html.escape(branch_s)}</style> │"
                 if branch_s
                 else ""
             )
-            return HTML(
-                f" {html.escape(cwd_s)} \u2502"
-                f"{branch_bit}"
-                f" {m_model}"
-                f" \u2502 {html.escape(current_mode)}"
-                f" \u2502 <style fg='#6c7086'>{html.escape(store.id)}</style>"
-                f" \u2502{card_bit}"
-                f" {facts_cnt} facts \u2502"
-                f" {prop_cnt} proposals \u2502"
-                f"{task_bit}"
-                f" <i>/help</i> "
-            )
+
+            if cols >= 110:
+                return HTML(
+                    f" {html.escape(cwd_s)} │"
+                    f"{branch_bit}"
+                    f" <style fg='#8b8b90'>{m_model}</style> │"
+                    f" <style fg='#e0af68'>{html.escape(current_mode)}</style> │"
+                    f" <style fg='#8b8b90'>{html.escape(store.id)}</style> │"
+                    f"{card_bit}"
+                    f" {facts_cnt} facts │"
+                    f" {prop_cnt} proposals │"
+                    f"{task_bit}"
+                    f" <style fg='#e0af68'>Ctrl+X</style> shortcuts "
+                )
+            elif cols >= 75:
+                return HTML(
+                    f" {html.escape(short_cwd)} │"
+                    f"{branch_bit}"
+                    f" <style fg='#8b8b90'>{short_model}</style> │"
+                    f" <style fg='#e0af68'>{html.escape(current_mode)}</style> │"
+                    f"{card_bit}"
+                    f"{task_bit}"
+                    f" <style fg='#e0af68'>Ctrl+X</style> "
+                )
+            else:
+                return HTML(
+                    f" <style fg='#e0af68'>{html.escape(current_mode)}</style> │"
+                    f"{card_bit}"
+                    f" <style fg='#e0af68'>Ctrl+X</style> "
+                )
         except Exception:
-            return HTML(" <b>Friday</b> \u2502 /help ") if HTML else None
+            return HTML(" <b>Friday</b> │ /shortcuts ") if HTML else None
 
     def get_composer_title():
         if HTML is None:
             return f"{store.id} {current_mode}"
         cwd_s, branch_s = workspace_bits()
-        bits = [f"<b>{html.escape(cwd_s)}</b>"]
-        if branch_s:
-            bits.append(f'<style fg="#a6e3a1">{html.escape(branch_s)}</style>')
-        bits.append(f'<style fg="#6c7086">{html.escape(store.id)}</style>')
-        bits.append(f'<style fg="#a6e3a1">{html.escape(current_mode)}</style>')
-        title = html.escape((store.title or "new session")[:32])
-        bits.append(f'<style fg="#6c7086">{title}</style>')
+        cols = shutil.get_terminal_size(fallback=(100, 24)).columns
+        bits = []
+        if cols >= 90:
+            bits.append(f"<b>{html.escape(cwd_s)}</b>")
+            if branch_s:
+                bits.append(f'<style fg="#00ff00">git:{html.escape(branch_s)}</style>')
+            bits.append(f'<style fg="#8b8b90">{html.escape(store.id)}</style>')
+            bits.append(f'<style fg="#e0af68">{html.escape(current_mode)}</style>')
+            title = html.escape((store.title or "new session")[:24])
+            bits.append(f'<style fg="#8b8b90">{title}</style>')
+        elif cols >= 60:
+            short_cwd = cwd_s.split("/")[-1] if "/" in cwd_s else (cwd_s.split("\\")[-1] if "\\" in cwd_s else cwd_s)
+            bits.append(f"<b>{html.escape(short_cwd)}</b>")
+            if branch_s:
+                bits.append(f'<style fg="#00ff00">git:{html.escape(branch_s)}</style>')
+            bits.append(f'<style fg="#8b8b90">{html.escape(store.id)}</style>')
+            bits.append(f'<style fg="#e0af68">{html.escape(current_mode)}</style>')
+        else:
+            bits.append(f'<style fg="#e0af68">{html.escape(current_mode)}</style>')
+            bits.append(f'<style fg="#8b8b90">{html.escape(store.id)}</style>')
         return HTML(" · ".join(bits))
 
+    MODES = ("Code", "Architect", "Ask", "Fast")
+
+    def cycle_mode() -> None:
+        nonlocal current_mode
+        i = next((n for n, m in enumerate(MODES) if m.lower() == current_mode.lower()), 0)
+        current_mode = MODES[(i + 1) % len(MODES)]
+        store.mode = current_mode
+
     session = _create_prompt_session(
-        lambda: stack, get_bottom_toolbar, get_composer_title, data_dir / ".cli_history"
+        lambda: stack,
+        get_bottom_toolbar,
+        get_composer_title,
+        data_dir / ".cli_history",
+        on_cycle_mode=cycle_mode,
     )
-    patch_ctx = patch_stdout(raw=True) if patch_stdout and session else None
 
     async def read_line() -> str:
         if session:
@@ -394,9 +462,15 @@ async def run_cli(root: Path) -> None:
             cwd_s, branch_s = workspace_bits()
             return await session.prompt_async(
                 lambda: _friday_prompt(store, current_mode, cwd_s, branch_s),
-                placeholder=HTML('<style color="#6c7086">message or /command</style>') if HTML else None,
+                placeholder=HTML('<style color="#6c6c6c">message, @file, or /command</style>') if HTML else None,
             )
         return await asyncio.to_thread(input, "Friday> ")
+
+    def attach_files(text: str) -> str:
+        from ui.mentions import expand_mentions
+
+        max_chars = int(stack["kernel_cfg"].get("tool_result_max_chars", 8000))
+        return expand_mentions(text, root, max_chars=max_chars)
 
     async def run_foreground(prompt: str, *, shown: str, skip_clarify: bool = False) -> None:
         render_user(shown)
@@ -411,15 +485,17 @@ async def run_cli(root: Path) -> None:
             console.print("[yellow]turn cancelled[/yellow]")
         except Exception as exc:
             console.print(f"[bold red]error[/bold red] {exc}")
+
         finally:
             ui_state["foreground"] = False
             renderer.finish()
             store.save(master.history, current_mode)
 
+    stdout_patch = None
     try:
-        if patch_ctx:
-            patch_ctx.__enter__()
-            ui_renderer.console.file = sys.stdout
+        if patch_stdout:
+            stdout_patch = patch_stdout(raw=True)
+            stdout_patch.__enter__()
         while True:
             try:
                 line = await read_line()
@@ -433,7 +509,7 @@ async def run_cli(root: Path) -> None:
                 kind, sname, rest = resolve_slash(line, stack.get("skills") or [])
                 if kind == "unknown":
                     console.print(
-                        f"[yellow]unknown command /{sname}[/yellow]  [dim]/help  /skills[/dim]"
+                        f"[yellow]unknown command /{sname}[/yellow]  [dim]/help  /shortcuts  /skills[/dim]"
                     )
                     continue
                 if kind == "skill":
@@ -444,8 +520,9 @@ async def run_cli(root: Path) -> None:
                         console.print(f"[yellow]unknown skill /{sname}[/yellow]")
                         continue
                     shown = f"/{skill.name}" + (f" {rest}" if rest else "")
+                    request = attach_files(rest) if rest else rest
                     await run_foreground(
-                        format_skill_turn(skill, rest),
+                        format_skill_turn(skill, request),
                         shown=shown,
                         skip_clarify=True,
                     )
@@ -453,9 +530,21 @@ async def run_cli(root: Path) -> None:
 
             if line in ("/quit", "/exit"):
                 break
+            if line in ("/shortcuts", "/keys"):
+                show_shortcuts_dialog()
+                continue
+            if line == "/plan":
+                plan_file = root / "plan.md"
+                if plan_file.is_file():
+                    lines = plan_file.read_text(encoding="utf-8").splitlines()
+                    render_plan("plan.md", lines)
+                else:
+                    render_plan("plan.md")
+                continue
             if line == "/help":
                 console.print(HELP)
                 continue
+
             if line == "/clear":
                 paint_shell()
                 continue
@@ -518,7 +607,11 @@ async def run_cli(root: Path) -> None:
             if line.startswith("/mode"):
                 parts = line.split(None, 1)
                 if len(parts) == 2:
-                    current_mode = parts[1].capitalize()
+                    match = next((m for m in MODES if m.lower() == parts[1].strip().lower()), None)
+                    if match is None:
+                        console.print("[yellow]Modes: Code, Architect, Ask, Fast[/yellow]")
+                        continue
+                    current_mode = match
                     store.mode = current_mode
                     console.print(f"[bold green]Mode {current_mode}[/bold green]")
                 else:
@@ -528,7 +621,7 @@ async def run_cli(root: Path) -> None:
                 show_skills_dialog(root)
                 continue
             if line == "/plugins" or line == "/tools":
-                show_plugins_dialog()
+                show_plugins_dialog(gate)
                 continue
             if line == "/settings":
                 render_settings(stack["kernel_cfg"], stack["perm_cfg"])
@@ -542,7 +635,7 @@ async def run_cli(root: Path) -> None:
                 kcfg = load_yaml(cfg_dir / "kernel.yaml")
                 stack["kernel_cfg"] = kcfg
                 master.clarify = bool(kcfg.get("clarify", True))
-                master.max_tool_steps = int(kcfg.get("max_tool_steps", 16)),
+                master.max_tool_steps = int(kcfg.get("max_tool_steps", 16))
                 prompts = stack["registry"].cfg.get("prompts") or {}
                 master.system_prompt = str(prompts.get("master") or master.system_prompt)
                 master.clarify_prompt = str(prompts.get("clarify") or master.clarify_prompt)
@@ -621,10 +714,13 @@ async def run_cli(root: Path) -> None:
                 console.print(f"[bold green]task {t.id} queued[/bold green] {title}")
                 continue
 
-            await run_foreground(line, shown=line)
+            await run_foreground(attach_files(line), shown=line)
     finally:
-        if patch_ctx:
-            patch_ctx.__exit__(None, None, None)
+        if stdout_patch is not None:
+            try:
+                stdout_patch.__exit__(None, None, None)
+            except Exception:
+                pass
         for w in watchers:
             w.cancel()
         store.save(master.history, current_mode)
