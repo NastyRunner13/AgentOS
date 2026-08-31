@@ -40,26 +40,6 @@ SPECS = [
     {
         "type": "function",
         "function": {
-            "name": "browser",
-            "description": "Control a Chromium page: navigate, snapshot, click, type, close.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["navigate", "snapshot", "click", "type", "close"],
-                    },
-                    "url": {"type": "string"},
-                    "ref": {"type": "string"},
-                    "text": {"type": "string"},
-                },
-                "required": ["action"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "web_search",
             "description": (
                 "Search the public web. Returns titles, URLs, and snippets, "
@@ -84,6 +64,26 @@ SPECS = [
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
                 "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser",
+            "description": "Control a Chromium page: navigate, snapshot, click, type, close.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["navigate", "snapshot", "click", "type", "close"],
+                    },
+                    "url": {"type": "string"},
+                    "ref": {"type": "string"},
+                    "text": {"type": "string"},
+                },
+                "required": ["action"],
             },
         },
     },
@@ -124,6 +124,21 @@ SPECS = [
                     "expect": {"type": "string"},
                 },
                 "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "skill",
+            "description": (
+                "Load a skill body by name from the catalog. "
+                "Call before inventing a procedure. Follow the body exactly."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
             },
         },
     },

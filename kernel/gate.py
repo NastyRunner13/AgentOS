@@ -27,6 +27,8 @@ class Gate:
             return int(self.cfg.get("web", {}).get("search_ring", 0))
         if tool == "web_fetch":
             return int(self.cfg.get("web", {}).get("fetch_ring", 0))
+        if tool == "skill":
+            return 0
         if tool == "spawn_task":
             return 0
         if tool == "kb_read":
@@ -78,6 +80,8 @@ class Gate:
             return f"web_search: {args.get('query', '')}"
         if tool == "web_fetch":
             return f"web_fetch: {args.get('url', '')}"
+        if tool == "skill":
+            return f"skill: {args.get('name', '')}"
         return f"{tool}: {args}"
 
     async def check(self, tool: str, args: dict, reason: str = "") -> bool:

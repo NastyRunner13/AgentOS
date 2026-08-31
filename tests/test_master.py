@@ -266,6 +266,121 @@ async def test_denied_shell_logged_not_run(tmp_path: Path):
     assert tool["meta"]["denied"] is True
 
 
+async def test_skill_tool_returns_body(tmp_path: Path):
+    from brain.skills import Skill
+
+    skill = Skill(name="commit", description="c", path=tmp_path, content="Write a commit.")
+    fake = FakeAdapter(
+        {
+            "script": {
+                "fast-a": '{"clarity":"clear"}',
+                "master-a": [
+                    (
+                        "",
+                        [
+                            {
+                                "id": "s1",
+                                "type": "function",
+                                "function": {"name": "skill", "arguments": '{"name":"commit"}'},
+                            }
+                        ],
+                    ),
+                    ("ok", []),
+                ],
+            }
+        }
+    )
+    bus, gate, tasks, registry, memory, master = _stack(tmp_path, fake)
+    master.skills = [skill]
+    await master.turn("commit this")
+    tool = next(e for e in memory.latest(20) if e["kind"] == "tool")
+    assert "Write a commit." in tool["content"]
+
+
+async def test_skill_tool_unknown_is_error_string(tmp_path: Path):
+    fake = FakeAdapter(
+        {
+            "script": {
+                "fast-a": '{"clarity":"clear"}',
+                "master-a": [
+                    (
+                        "",
+                        [
+                            {
+                                "id": "s1",
+                                "type": "function",
+                                "function": {"name": "skill", "arguments": '{"name":"nope"}'},
+                            }
+                        ],
+                    ),
+                    ("ok", []),
+                ],
+            }
+        }
+    )
+    bus, gate, tasks, registry, memory, master = _stack(tmp_path, fake)
+    await master.turn("use nope")
+    tool = next(e for e in memory.latest(20) if e["kind"] == "tool")
+    assert "unknown skill nope" in tool["content"]
+
+
+async def test_allowed_tools_blocks_shell(tmp_path: Path):
+    from brain.skills import Skill
+
+    ran = []
+
+    async def runner(command, timeout, cwd):
+        ran.append(command)
+        return "ok"
+
+    skill = Skill(
+        name="commit",
+        description="c",
+        path=tmp_path,
+        content="use files only",
+        allowed_tools=["files"],
+    )
+    fake = FakeAdapter(
+        {
+            "script": {
+                "fast-a": '{"clarity":"clear"}',
+                "master-a": [
+                    (
+                        "",
+                        [
+                            {
+                                "id": "s1",
+                                "type": "function",
+                                "function": {"name": "skill", "arguments": '{"name":"commit"}'},
+                            }
+                        ],
+                    ),
+                    (
+                        "",
+                        [
+                            {
+                                "id": "c1",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": '{"command":"echo hi"}',
+                                },
+                            }
+                        ],
+                    ),
+                    ("stopped", []),
+                ],
+            }
+        }
+    )
+    bus, gate, tasks, registry, memory, master = _stack(tmp_path, fake, shell_runner=runner)
+    master.skills = [skill]
+    await master.turn("commit")
+    assert ran == []
+    tools = [e for e in memory.latest(20) if e["kind"] == "tool"]
+    assert any("skill forbids this tool" in e["content"] for e in tools)
+
+
 async def test_web_search_not_browser(tmp_path: Path, monkeypatch):
     import tools.web as webmod
 
@@ -349,9 +464,10 @@ def test_openrouter_roles_and_memory_stage():
     assert "shell" in clarify
     assert "web_search" in clarify
     assert "web_fetch" in clarify
+    assert "skill" in clarify
     assert "working directory" in clarify
     master = models["prompts"]["master"]
-    for token in ("web_search", "files", "browser", "computer"):
+    for token in ("web_search", "files", "browser", "computer", "skill"):
         assert token in master
     assert "succeeded" in master
     assert mem["stage"] in (0, 1)

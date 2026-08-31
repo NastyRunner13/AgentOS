@@ -7,11 +7,11 @@ Supports SKILL.md with YAML frontmatter or Markdown formats.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import os
 from pathlib import Path
-import re
-from typing import Any
 import yaml
+
+
+DESC_CAP = 200
 
 
 @dataclass
@@ -19,10 +19,11 @@ class Skill:
     name: str
     description: str
     path: Path
-    source: str = "Global"  # "Global", "Workspace", "Custom"
+    source: str = "Global"  # "Global", "Workspace", "Custom", "Project"
     content: str = ""
     allowed_tools: list[str] = field(default_factory=list)
     user_invocable: bool = True
+    disable_model_invocation: bool = False
 
 
 def parse_skill_file(skill_md_path: Path, source: str = "Global") -> Skill | None:
@@ -36,6 +37,7 @@ def parse_skill_file(skill_md_path: Path, source: str = "Global") -> Skill | Non
     description = "Custom agent skill"
     allowed_tools: list[str] = []
     user_invocable = True
+    disable_model_invocation = False
     content = raw
 
     # Check for YAML frontmatter: --- ... ---
@@ -58,6 +60,10 @@ def parse_skill_file(skill_md_path: Path, source: str = "Global") -> Skill | Non
                         user_invocable = bool(fm.get("user-invocable"))
                     elif "user_invocable" in fm:
                         user_invocable = bool(fm.get("user_invocable"))
+                    if "disable-model-invocation" in fm:
+                        disable_model_invocation = bool(fm.get("disable-model-invocation"))
+                    elif "disable_model_invocation" in fm:
+                        disable_model_invocation = bool(fm.get("disable_model_invocation"))
             except Exception:
                 pass
 
@@ -78,6 +84,7 @@ def parse_skill_file(skill_md_path: Path, source: str = "Global") -> Skill | Non
         content=content,
         allowed_tools=allowed_tools,
         user_invocable=user_invocable,
+        disable_model_invocation=disable_model_invocation,
     )
 
 
@@ -90,49 +97,70 @@ def load_skills(
     Discovers and loads skills from:
     1. Global directory (default: ~/.agents/skills or custom global_dir)
     2. Any custom directories provided
-    3. Workspace directory (root / "skills" if root is provided)
-
-    If skills with identical names exist, workspace skills override global skills.
+    3. `.agents/skills` walking from root up to the git root (nearest wins)
+    4. Workspace directory (root / "skills") last on name collision
     """
     skills_map: dict[str, Skill] = {}
 
-    # 1. Global directory (~/.agents/skills)
-    g_dir = global_dir or (Path.home() / ".agents" / "skills")
-    if g_dir.is_dir():
-        for p in sorted(g_dir.glob("*/SKILL.md")):
-            skill = parse_skill_file(p, source="Global")
+    def _ingest(folder: Path, source: str) -> None:
+        if not folder.is_dir():
+            return
+        for p in sorted(folder.glob("*/SKILL.md")):
+            skill = parse_skill_file(p, source=source)
             if skill:
                 skills_map[skill.name] = skill
 
-    # 2. Custom dirs if provided
+    g_dir = global_dir or (Path.home() / ".agents" / "skills")
+    _ingest(g_dir, "Global")
+
     if custom_dirs:
         for c_dir in custom_dirs:
-            if c_dir.is_dir():
-                for p in sorted(c_dir.glob("*/SKILL.md")):
-                    skill = parse_skill_file(p, source="Custom")
-                    if skill:
-                        skills_map[skill.name] = skill
+            _ingest(c_dir, "Custom")
 
-    # 3. Workspace directory (root / "skills")
     if root:
-        ws_dir = root / "skills"
-        if ws_dir.is_dir():
-            for p in sorted(ws_dir.glob("*/SKILL.md")):
-                skill = parse_skill_file(p, source="Workspace")
-                if skill:
-                    skills_map[skill.name] = skill
+        for folder in _ancestor_skill_dirs(root):
+            _ingest(folder, "Project")
+        _ingest(root / "skills", "Workspace")
 
     return list(skills_map.values())
 
 
+def _ancestor_skill_dirs(start: Path) -> list[Path]:
+    """`.agents/skills` from git root (or start) down to start, so nearer wins."""
+    try:
+        start = start.resolve()
+    except OSError:
+        return []
+    chain = [start, *start.parents]
+    git_root = None
+    for p in chain:
+        if (p / ".git").exists():
+            git_root = p
+            break
+    dirs: list[Path] = []
+    for p in chain:
+        dirs.append(p / ".agents" / "skills")
+        if git_root is not None and p == git_root:
+            break
+        if git_root is None:
+            break
+    dirs.reverse()
+    return dirs
+
+
 def format_skills_for_prompt(skills: list[Skill]) -> str:
-    """Formats skills as a concise markdown list for inclusion in system prompt."""
-    if not skills:
-        return ""
+    """Name + description + source only. Omits disable-model-invocation skills."""
     lines = ["Available procedural skills:"]
+    shown = False
     for s in skills:
-        lines.append(f"- **{s.name}** ({s.source}): {s.description}")
-    return "\n".join(lines)
+        if s.disable_model_invocation:
+            continue
+        desc = " ".join(s.description.split())
+        if len(desc) > DESC_CAP:
+            desc = desc[: DESC_CAP - 3] + "..."
+        lines.append(f"- **{s.name}** ({s.source}): {desc}")
+        shown = True
+    return "\n".join(lines) if shown else ""
 
 
 def find_skill(name: str, skills: list[Skill]) -> Skill | None:

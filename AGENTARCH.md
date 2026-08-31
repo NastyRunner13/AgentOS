@@ -115,7 +115,7 @@ Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`
 `config/kernel.yaml` `clarify` (default true) scores each chat turn with `fast` before master. Prompt: `config/models.yaml` `prompts.clarify`.
 
 - Input: current user text plus the last 3 foreground `history` turns. No tools on the scorer.
-- `unclear` is only a missing user choice that would change the action (which path, which app, which person). Friday already has `files`, `shell`, `browser`, `computer`, `web_search`, `web_fetch`, and kb tools. An omitted path is the working directory. "Look up X" / "research Y" is **clear**.
+- `unclear` is only a missing user choice that would change the action (which path, which app, which person). Friday already has `files`, `shell`, `browser`, `computer`, `web_search`, `web_fetch`, `skill`, and kb tools. An omitted path is the working directory. "Look up X" / "research Y" is **clear**.
 - `unclear` asks at most 3 questions, writes them to L2 and `history`, and returns without master. The next foreground user turn skips the scorer and runs master with that `history`.
 - `trivial` appends `[assumption]` and continues to master. `clear` continues.
 - Background **task** turns still score; they neither set nor consume the skip, and they do not receive CLI `history`.
@@ -136,6 +136,7 @@ Chat tools and their default rings (`config/permissions.yaml`). Unknown names ar
 | `files` read/search | 0 | sandbox inside approved roots |
 | `web_search` | 0 | DuckDuckGo HTML query → `{title, url, snippet}`, wrapped **untrusted** |
 | `web_fetch` | 0 | HTTP GET `http:`/`https:` only; block localhost and private IPs (127/10/172.16–31/192.168); wrapped **untrusted**; truncated to `tool_result_max_chars` |
+| `skill` | 0 | return a SKILL.md body by name |
 | `spawn_task` / `kb_read` | 0 | |
 | `files` write / `browser` / `computer` / `kb_propose` / `kb_consolidate` | 1 | |
 | `shell` allowlisted | 1 | |
@@ -152,13 +153,23 @@ L2 episodic (SQLite + FTS5) always-on audit log → L3 semantic (vector recall) 
 
 ### Skills
 
+Discovery, nearest wins on name: `~/.agents/skills/*/SKILL.md` (or `kernel.yaml` `skills_dir`), then `.agents/skills/*/SKILL.md` walking from the workspace up to the git root (or `root` if there is no git), then workspace `skills/*/SKILL.md` last. Optional `.claude/skills` is not loaded.
+
+The master prompt gets a catalog of name + description + source (`format_skills_for_prompt`; descriptions capped ~200 characters). Bodies stay out of the system prompt. The `skill` tool `{name}` (ring 0) returns the body, or an error string if the name is unknown or `disable-model-invocation` is set. `/name` and `/skill <name>` still inject the body via `format_skill_turn` as a foreground turn.
+
+`disable-model-invocation: true` hides a skill from the catalog and from the `skill` tool; slash still works.
+
+When a skill is active on that turn (slash load or a `skill` tool call) and `allowed-tools` is non-empty, any other tool returns `skill forbids this tool` (still logged). An empty list adds no restriction. The permission gate still applies.
+
+Community skill bodies are **untrusted** for tool-trigger purposes. Loading is not executing; scripts inside a skill still go through `shell` / rings.
+
 Triggers in trust order: active suggestion after novel multi-step success → explicit teaching → gated passive mining. Pipeline: trajectory → generalized `SKILL.md` with `{{parameters}}` → dry-run validation → approval queue. Two consecutive failures auto-suspend a skill pending review. Versions are rollback points; user edits outrank agent edits. Community skill descriptions are **untrusted**; install is a **card** after a human reads the source.
 
 ### Config surface
 
 Versioned source of truth, one file per concern: `models.yaml`, `voice.yaml`, `permissions.yaml`, `memory.yaml`, `mcp_servers.json`, `voice.yaml` latency budget. Behavior changes ship as config diffs wherever possible; schema changes require updating the matching section here in the same commit.
 
-`models.yaml` `prompts.master` teaches tool choice (files vs `web_search`/`web_fetch` vs `browser` vs `computer` vs `shell`) and forbids claiming success without a tool result. `prompts.clarify` lists the same tools; research asks are **clear**.
+`models.yaml` `prompts.master` teaches tool choice (files vs `web_search`/`web_fetch` vs `browser` vs `computer` vs `shell` vs `skill`) and forbids claiming success without a tool result. `prompts.clarify` lists the same tools; research asks are **clear**.
 
 `permissions.yaml` `web:` (`search_ring`, `fetch_ring`, `search_max_results`, `fetch_timeout_seconds`, `user_agent`). DuckDuckGo HTML needs no API key.
 

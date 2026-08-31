@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from brain.skills import (
+    DESC_CAP,
     Skill,
     find_skill,
     format_skill_turn,
@@ -136,3 +137,74 @@ def test_format_skill_turn():
     assert "User request: fix the build" in text
     bare = format_skill_turn(skill, "")
     assert "Follow the skill instructions." in bare
+
+
+def test_load_skills_ancestor_agents_override(tmp_path: Path):
+    (tmp_path / ".git").mkdir()
+    root_skill = tmp_path / ".agents" / "skills" / "shared"
+    root_skill.mkdir(parents=True)
+    (root_skill / "SKILL.md").write_text(
+        "---\nname: shared\ndescription: from git root\n---\nROOT BODY\n",
+        encoding="utf-8",
+    )
+    only_root = tmp_path / ".agents" / "skills" / "only-root"
+    only_root.mkdir(parents=True)
+    (only_root / "SKILL.md").write_text(
+        "---\nname: only-root\ndescription: only at git root\n---\nX\n",
+        encoding="utf-8",
+    )
+    project = tmp_path / "app"
+    project.mkdir()
+    child = project / ".agents" / "skills" / "shared"
+    child.mkdir(parents=True)
+    (child / "SKILL.md").write_text(
+        "---\nname: shared\ndescription: from project\n---\nPROJECT BODY\n",
+        encoding="utf-8",
+    )
+    skills = load_skills(root=project, global_dir=tmp_path / "no-global")
+    shared = find_skill("shared", skills)
+    assert shared is not None
+    assert shared.source == "Project"
+    assert shared.description == "from project"
+    assert "PROJECT BODY" in shared.content
+    assert find_skill("only-root", skills) is not None
+
+
+def test_catalog_omits_body_and_caps_description():
+    long = "x" * 300
+    skills = [
+        Skill(
+            name="alpha",
+            description=long,
+            path=Path("/a"),
+            source="Global",
+            content="SECRET BODY PROCEDURE",
+        ),
+        Skill(
+            name="hidden",
+            description="should not appear",
+            path=Path("/h"),
+            disable_model_invocation=True,
+            content="hidden body",
+        ),
+    ]
+    block = format_skills_for_prompt(skills)
+    assert "SECRET BODY PROCEDURE" not in block
+    assert "hidden" not in block
+    assert "should not appear" not in block
+    alpha = next(line for line in block.splitlines() if "alpha" in line)
+    assert "..." in alpha
+    assert len(alpha) < 80 + DESC_CAP
+
+
+def test_parse_disable_model_invocation(tmp_path: Path):
+    skill_dir = tmp_path / "internal"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: internal\ndescription: Hidden from catalog\n"
+        "disable-model-invocation: true\n---\nBody\n",
+        encoding="utf-8",
+    )
+    skill = parse_skill_file(skill_dir / "SKILL.md")
+    assert skill is not None
+    assert skill.disable_model_invocation is True

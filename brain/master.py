@@ -73,6 +73,7 @@ class Master:
         self.skills = skills or []
         self.history: list[dict] = []
         self._awaiting_clarify = False
+        self._active_skill = None
 
     def scrub(self, text: str) -> str:
         for secret in self.secrets:
@@ -130,13 +131,27 @@ class Master:
             conv.extend(self.history)
         conv.append({"role": "user", "content": text})
 
-        reply = await self._loop(conv, task, on_token)
+        self._active_skill = self._skill_from_turn(text)
+        try:
+            reply = await self._loop(conv, task, on_token)
+        finally:
+            self._active_skill = None
         if task is None:
             self.history.append({"role": "user", "content": text})
             self.history.append({"role": "assistant", "content": reply})
         self.memory.write("turn", content=reply, role="assistant", meta={"task_id": task.id if task else None})
         self.bus.publish("agent.state", {"phase": "idle", "task_id": task.id if task else None})
         return reply
+
+    def _skill_from_turn(self, text: str):
+        if not text.startswith("[skill:"):
+            return None
+        from brain.skills import find_skill
+
+        end = text.find("]", 7)
+        if end < 0:
+            return None
+        return find_skill(text[7:end], self.skills)
 
     async def _clarify(self, text: str, *, use_history: bool = True) -> dict:
         messages = [{"role": "system", "content": self.clarify_prompt}]
@@ -197,7 +212,11 @@ class Master:
             )
             if not calls:
                 continue
-            for call in calls:
+            ordered = sorted(
+                calls,
+                key=lambda c: 0 if (c.get("function") or {}).get("name") == "skill" else 1,
+            )
+            for call in ordered:
                 result = await self._run_tool(call, task)
                 conv.append(
                     {
@@ -214,7 +233,31 @@ class Master:
         args = _parse_args(fn.get("arguments", ""))
         if name == "files" and args.get("action") == "delete":
             args["_size"] = self.tools.file_size(str(args.get("path", "")))
-        self.bus.publish("tool.call", {"name": name, "args": args, "ring": self.gate.classify(name, args)})
+        self.bus.publish(
+            "tool.call",
+            {
+                "name": name,
+                "args": args,
+                "ring": self.gate.classify(name, args),
+                "task_id": task.id if task else None,
+            },
+        )
+        if (
+            self._active_skill
+            and self._active_skill.allowed_tools
+            and name not in self._active_skill.allowed_tools
+        ):
+            result = "skill forbids this tool"
+            self.memory.write("tool", content=result, role=name, meta={"args": args, "denied": True})
+            self.bus.publish(
+                "tool.result",
+                {
+                    "name": name,
+                    "result": result,
+                    "task_id": task.id if task else None,
+                },
+            )
+            return result
         if task:
             task.status = "waiting_approval" if self.gate.classify(name, args) >= 2 else "running"
             self.bus.publish("task.update", task.as_dict())
@@ -240,11 +283,29 @@ class Master:
             result = f"proposed {pid} (pending approval)" if pid else "duplicate or invalid proposal"
         elif name == "kb_consolidate":
             result = json.dumps(await draft(self.memory, self.registry, self.bus))
+        elif name == "skill":
+            result = self._load_skill(str(args.get("name") or ""))
         else:
             result = await self.tools.execute(name, args)
         self.memory.write("tool", content=result, role=name, meta={"args": args, "denied": not ok})
-        self.bus.publish("tool.result", {"name": name, "result": self.scrub(result)[:500]})
+        self.bus.publish(
+            "tool.result",
+            {
+                "name": name,
+                "result": self.scrub(result)[:500],
+                "task_id": task.id if task else None,
+            },
+        )
         return result
+
+    def _load_skill(self, name: str) -> str:
+        from brain.skills import find_skill
+
+        skill = find_skill(name, self.skills)
+        if skill is None or skill.disable_model_invocation:
+            return f"unknown skill {name}"
+        self._active_skill = skill
+        return skill.content or f"skill {skill.name} has an empty body"
 
     def _emit_text(self, piece: str, on_token: OnToken | None, task_id: str | None = None) -> None:
         self.bus.publish("agent.state", {"phase": "token", "text": piece, "task_id": task_id})

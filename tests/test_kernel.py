@@ -102,6 +102,7 @@ def test_every_spec_has_explicit_ring():
         "computer": 1,
         "web_search": 0,
         "web_fetch": 0,
+        "skill": 0,
         "spawn_task": 0,
         "kb_read": 0,
         "kb_propose": 1,
@@ -115,6 +116,7 @@ def test_every_spec_has_explicit_ring():
         "query": "x",
         "kind": "fact",
         "url": "https://example.com",
+        "name": "x",
     }
     for name, ring in expected.items():
         assert gate.classify(name, args) == ring, name
