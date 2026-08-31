@@ -17,6 +17,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+voice = [
+    "faster-whisper>=1.0",
+    "sounddevice>=0.5",
+    "numpy>=1.26",
+    "kokoro-onnx>=0.4",
+    "onnxruntime>=1.17",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -24,4 +31,4 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.setuptools.packages.find]
-include = ["kernel*", "brain*", "memory*", "tools*", "evals*", "ui*"]
+include = ["kernel*", "brain*", "memory*", "tools*", "evals*", "ui*", "voice*", "orb*"]

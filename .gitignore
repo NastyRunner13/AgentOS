@@ -24,6 +24,8 @@ target/
 data/
 evals/runs/
 temp/
+models/*.onnx
+models/*.bin
 
 # OS junk
 Thumbs.db
