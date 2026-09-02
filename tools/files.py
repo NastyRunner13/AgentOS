@@ -14,6 +14,19 @@ def _within(path: Path, root: Path) -> bool:
         return False
 
 
+def is_plan_path(raw: str, root: Path) -> bool:
+    """True only for workspace-root plan.md."""
+    if not raw or not root:
+        return False
+    try:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = root / p
+        return p.resolve() == (root.resolve() / "plan.md")
+    except OSError:
+        return False
+
+
 def resolve(raw: str, root: Path, perm_cfg: dict) -> Path:
     if not raw:
         raise ValueError("missing path")

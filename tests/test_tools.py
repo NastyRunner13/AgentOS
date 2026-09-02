@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tools import NativeTools
+from tools.files import is_plan_path
 
 PERM = {
     "files": {
@@ -42,6 +43,11 @@ def test_files_refuse_directory_delete_and_missing(tmp_path: Path):
     (tmp_path / "d").mkdir()
     assert "refusing" in tools.files({"action": "delete", "path": "d"})
     assert "missing" in tools.files({"action": "delete", "path": "nope.txt"})
+
+
+def test_is_plan_path(tmp_path: Path):
+    assert is_plan_path("plan.md", tmp_path)
+    assert not is_plan_path("pkg/plan.md", tmp_path)
 
 
 def test_files_missing_path():
