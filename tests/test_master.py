@@ -28,6 +28,44 @@ async def test_secrets_never_land_in_episodic(tmp_path: Path):
     assert "***" in blob
 
 
+async def test_tool_secrets_scrubbed_in_episodic(tmp_path: Path):
+    async def fake_runner(cmd, timeout, cwd):
+        return "result contains s3cr3t-api-key inside"
+
+    fake = FakeAdapter(
+        {
+            "script": {
+                "fast-a": '{"clarity":"clear"}',
+                "master-a": [
+                    (
+                        "",
+                        [
+                            {
+                                "id": "c1",
+                                "type": "function",
+                                "function": {
+                                    "name": "shell",
+                                    "arguments": '{"command":"echo s3cr3t-api-key"}',
+                                },
+                            }
+                        ],
+                    ),
+                    ("finished", []),
+                ],
+            }
+        }
+    )
+    bus, gate, tasks, registry, memory, master = _stack(
+        tmp_path, fake, shell_runner=fake_runner
+    )
+    master.secrets = ["s3cr3t-api-key"]
+    await master.turn("run echo")
+    events = memory.latest(20)
+    blob = json.dumps(events)
+    assert "s3cr3t-api-key" not in blob
+    assert "***" in blob
+
+
 async def test_unclear_asks_and_skips_master(tmp_path: Path):
     fake = FakeAdapter(
         {"script": {"fast-a": '{"clarity":"unclear","questions":["which folder?"]}', "master-a": "should not run"}}

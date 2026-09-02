@@ -120,6 +120,15 @@ class Master:
             text = text.replace(secret, "***")
         return text
 
+    def scrub_obj(self, obj: Any) -> Any:
+        if isinstance(obj, str):
+            return self.scrub(obj)
+        if isinstance(obj, dict):
+            return {k: self.scrub_obj(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self.scrub_obj(v) for v in obj]
+        return obj
+
     async def drain_steer(self, task: Task | None, conv: list[dict]) -> list[str]:
         got = []
         if task is None:
@@ -131,7 +140,7 @@ class Master:
                 break
             got.append(msg)
             conv.append({"role": "user", "content": f"[steer] {msg}"})
-            self.memory.write("steer", content=msg, role="user", meta={"task_id": task.id})
+            self.memory.write("steer", content=self.scrub(msg), role="user", meta={"task_id": task.id})
         return got
 
     async def turn(
@@ -153,16 +162,25 @@ class Master:
         elif self.clarify:
             decision = await self._clarify(text, use_history=task is None)
             if decision.get("clarity") == "unclear":
-                questions = decision.get("questions") or ["What did you mean?"]
-                reply = "I need a bit more:\n" + "\n".join(f"- {q}" for q in questions[:3])
-                self._emit_text(reply, on_token, task.id if task else None)
-                self.memory.write("turn", content=reply, role="assistant", meta={"task_id": task.id if task else None})
-                if task is None:
-                    self._awaiting_clarify = True
-                    self.history.append({"role": "user", "content": text})
-                    self.history.append({"role": "assistant", "content": reply})
-                self.bus.publish("agent.state", {"phase": "idle", "task_id": task.id if task else None})
-                return reply
+                question = decision.get("question")
+                options = decision.get("options") or []
+                if not question and decision.get("questions"):
+                    question = decision["questions"][0]
+
+                if options and task is None and hasattr(self.gate, "ask"):
+                    answer = await self.gate.ask(question or "Clarification needed", options)
+                    text = f"{text}\n\n[clarification: {question} -> {answer}]"
+                else:
+                    questions = decision.get("questions") or [question or "What did you mean?"]
+                    reply = "I need a bit more:\n" + "\n".join(f"- {q}" for q in questions[:3])
+                    self._emit_text(reply, on_token, task.id if task else None)
+                    self.memory.write("turn", content=reply, role="assistant", meta={"task_id": task.id if task else None})
+                    if task is None:
+                        self._awaiting_clarify = True
+                        self.history.append({"role": "user", "content": text})
+                        self.history.append({"role": "assistant", "content": reply})
+                    self.bus.publish("agent.state", {"phase": "idle", "task_id": task.id if task else None})
+                    return reply
             if decision.get("clarity") == "trivial" and decision.get("assumption"):
                 text = f"{text}\n\n[assumption] {decision['assumption']}"
 
@@ -304,12 +322,12 @@ class Master:
             and name not in self._active_skill.allowed_tools
         ):
             result = "skill forbids this tool"
-            self.memory.write("tool", content=result, role=name, meta={"args": args, "denied": True})
+            self.memory.write("tool", content=self.scrub(result), role=name, meta={"args": self.scrub_obj(args), "denied": True})
             self.bus.publish(
                 "tool.result",
                 {
                     "name": name,
-                    "result": result,
+                    "result": self.scrub(result),
                     "task_id": task.id if task else None,
                 },
             )
@@ -341,9 +359,24 @@ class Master:
             result = json.dumps(await draft(self.memory, self.registry, self.bus))
         elif name == "skill":
             result = self._load_skill(str(args.get("name") or ""))
+        elif name == "ask_user":
+            question = str(args.get("question") or "")
+            options = list(args.get("options") or [])
+            if not options:
+                options = ["Proceed", "Cancel"]
+            if hasattr(self.gate, "ask"):
+                answer = await self.gate.ask(question, options)
+                result = f"User selected: {answer}"
+            else:
+                result = f"User selected: {options[0]}"
         else:
             result = await self.tools.execute(name, args)
-        self.memory.write("tool", content=result, role=name, meta={"args": args, "denied": not ok})
+        self.memory.write(
+            "tool",
+            content=self.scrub(result),
+            role=name,
+            meta={"args": self.scrub_obj(args), "denied": not ok},
+        )
         self.bus.publish(
             "tool.result",
             {

@@ -38,6 +38,7 @@ def collect_secrets(
     models_cfg: dict,
     perm_cfg: dict | None = None,
     voice_cfg: dict | None = None,
+    env_path: Path | None = None,
 ) -> list[str]:
     found = []
     seen: set[str] = set()
@@ -55,6 +56,13 @@ def collect_secrets(
         if val and val not in seen:
             seen.add(val)
             found.append(val)
+    if env_path and env_path.is_file():
+        from dotenv import dotenv_values
+
+        for val in dotenv_values(env_path).values():
+            if val and len(val) >= 4 and val not in seen:
+                seen.add(val)
+                found.append(val)
     return found
 
 
@@ -105,7 +113,7 @@ def boot(root: Path):
         clarify_prompt=str(prompts.get("clarify") or ""),
         clarify=bool(kernel_cfg.get("clarify", True)),
         max_tool_steps=int(kernel_cfg.get("max_tool_steps", 16)),
-        secrets=collect_secrets(models_cfg, perm_cfg, voice_cfg),
+        secrets=collect_secrets(models_cfg, perm_cfg, voice_cfg, env_path=root / ".env"),
         skills=skills,
     )
     return {
@@ -335,6 +343,32 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
             return
         if ui_state.get("prompt_up"):
             return
+        kind = ev.get("kind", "permission")
+        if kind == "question":
+            options = ev.get("options") or []
+            try:
+                from prompt_toolkit import PromptSession
+
+                hint = f"1-{len(options)}" if options else "text"
+                choice = await PromptSession().prompt_async(
+                    HTML(f'<style fg="#89b4fa">  choice [{hint} or custom]:</style> ')
+                    if HTML
+                    else f"  choice [{hint} or custom]: "
+                )
+            except (EOFError, KeyboardInterrupt, Exception):
+                choice = "1"
+            if cid in gate.pending():
+                raw = str(choice).strip()
+                if raw.isdigit() and 1 <= int(raw) <= len(options):
+                    selected = options[int(raw) - 1]
+                elif raw.lower() == "c" or not raw:
+                    selected = options[0] if options else "cancelled"
+                else:
+                    selected = raw
+                gate.resolve(cid, selected)
+                console.print(f"[bold #a6e3a1]selected:[/bold #a6e3a1] {selected}")
+            return
+
         try:
             from prompt_toolkit import PromptSession
 
@@ -355,7 +389,10 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
         if not ev.get("expired"):
             return
         cid = ev.get("id", "")
-        fate = "allowed" if ev.get("approved") else "denied"
+        if "answer" in ev:
+            fate = f"selected default '{ev.get('answer')}'"
+        else:
+            fate = "allowed" if ev.get("approved") else "denied"
         console.print(f"[yellow]card {cid} expired → {fate}[/yellow]")
 
     def on_error(ev: dict) -> None:
