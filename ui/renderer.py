@@ -337,8 +337,44 @@ def render_user(text: str, out: Console | None = None) -> None:
     c.print(line)
 
 
+def render_question_card(ev: dict[str, Any], out: Console | None = None) -> None:
+    """Left-border multiple-choice question card for pre-implementation unclarities."""
+    c = out or console
+    width = term_cols(c)
+    cid = ev.get("id", "unknown")
+    question = ev.get("question") or ev.get("action_preview") or "Clarification needed"
+    options = ev.get("options") or []
+    allow_custom = ev.get("allow_custom", True)
+    inner = max(16, width - 12)
+
+    body = Text()
+    accent = "bold #89b4fa"
+    body.append("┃  ◆ Clarification needed\n", style=accent)
+    body.append("┃  ", style="dim #8b8b90")
+    body.append(f"{str(question)[:inner]}\n\n", style="bold white")
+    for idx, opt in enumerate(options, 1):
+        body.append(f"┃  ({idx}) ", style="bold #a6e3a1")
+        body.append(f"{str(opt)[:inner]}\n", style="white")
+    if allow_custom:
+        body.append("┃  (c) ", style="bold #fab387")
+        body.append("Custom write-in\n", style="dim #c0c0c0")
+
+    c.print(
+        Panel(
+            body,
+            title=f"card {cid} · choice",
+            border_style="#89b4fa",
+            padding=(0, 1),
+            expand=width >= 60,
+        )
+    )
+
+
 def render_card(ev: dict[str, Any], out: Console | None = None) -> None:
-    """Left-border permission card. Inline y/n is the live path; /approve remains."""
+    """Left-border permission or question card. Inline y/n is the live path; /approve remains."""
+    if ev.get("kind") == "question":
+        render_question_card(ev, out=out)
+        return
     c = out or console
     width = term_cols(c)
     cid = ev.get("id", "unknown")
