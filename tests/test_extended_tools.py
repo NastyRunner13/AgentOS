@@ -208,3 +208,32 @@ async def test_xy_click_rejects_coords_still_outside_screen(tmp_path: Path):
     assert raw["verified"] is False
     assert pixels.clicks == []
     assert "outside" in raw["verify"]["detail"]
+
+
+async def test_browser_auto_recovery_when_closed():
+    class MockClosedPage:
+        def __init__(self):
+            self.closed = True
+
+        def is_closed(self):
+            return self.closed
+
+        async def goto(self, url):
+            raise Exception("Page.goto: Target page, context or browser has been closed")
+
+    b = Browser(PERM)
+    b._page = MockClosedPage()
+    assert b._is_alive() is False
+
+    reopened = False
+
+    async def mock_init():
+        nonlocal reopened
+        reopened = True
+        b._page = FakePage()
+        return None
+
+    b._init_session = mock_init
+    res = await b.run({"action": "snapshot"})
+    assert reopened is True
+    assert "hello" in res

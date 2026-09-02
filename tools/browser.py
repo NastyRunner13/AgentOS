@@ -15,6 +15,40 @@ class Browser:
         self._context = None
         self._page = None
 
+    async def _close_session(self) -> None:
+        if self._context:
+            try:
+                await self._context.close()
+            except Exception:
+                pass
+            self._context = None
+        if self._browser:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+        if self._pw:
+            try:
+                await self._pw.stop()
+            except Exception:
+                pass
+            self._pw = None
+        self._page = None
+
+    def _is_alive(self) -> bool:
+        if self._page is None:
+            return False
+        try:
+            if hasattr(self._page, "is_closed") and self._page.is_closed():
+                if self._context and hasattr(self._context, "pages") and self._context.pages:
+                    self._page = self._context.pages[0]
+                    return not (hasattr(self._page, "is_closed") and self._page.is_closed())
+                return False
+        except Exception:
+            return False
+        return True
+
     async def _init_session(self) -> str | None:
         try:
             from playwright.async_api import async_playwright
@@ -55,32 +89,23 @@ class Browser:
     async def run(self, args: dict) -> str:
         action = str(args.get("action", "snapshot"))
         if action == "close":
-            if self._context:
-                try:
-                    await self._context.close()
-                except Exception:
-                    pass
-                self._context = None
-            if self._browser:
-                try:
-                    await self._browser.close()
-                except Exception:
-                    pass
-                self._browser = None
-            if self._pw:
-                try:
-                    await self._pw.stop()
-                except Exception:
-                    pass
-                self._pw = None
-            self._page = None
+            await self._close_session()
             return "closed"
 
-        if self._page is None:
+        if not self._is_alive():
+            await self._close_session()
             err = await self._init_session()
             if err:
                 return err
 
+        try:
+            return await self._dispatch(action, args)
+        except Exception as e:
+            if "closed" in str(e).lower():
+                await self._close_session()
+            raise
+
+    async def _dispatch(self, action: str, args: dict) -> str:
         page = self._page
         if action == "navigate":
             url = str(args.get("url", "")).strip()
@@ -91,7 +116,17 @@ class Browser:
                 reason = blocked_url(url)
                 if reason:
                     return f"blocked url: {reason}"
-            await page.goto(url)
+            try:
+                await page.goto(url)
+            except Exception as e:
+                if "closed" in str(e).lower():
+                    await self._close_session()
+                    err = await self._init_session()
+                    if err:
+                        return f"failed to reopen browser: {err}"
+                    await self._page.goto(url)
+                    return f"navigated {self._page.url}"
+                raise
             return f"navigated {page.url}"
         if action == "snapshot":
             text = await page.locator("body").inner_text()

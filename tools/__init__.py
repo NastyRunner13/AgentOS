@@ -34,7 +34,10 @@ class NativeTools:
 
     @property
     def _page(self):
-        return self._session._page
+        page = self._session._page
+        if page is not None and hasattr(page, "is_closed") and page.is_closed():
+            return None
+        return page
 
     @property
     def _browser(self):
