@@ -80,17 +80,19 @@ SPECS = [
         "type": "function",
         "function": {
             "name": "browser",
-            "description": "Control a Chromium page: navigate, snapshot, click, type, close.",
+            "description": "Control a Chromium page: navigate, snapshot, click, type, upload, wait, screenshot, close.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["navigate", "snapshot", "click", "type", "close"],
+                        "enum": ["navigate", "snapshot", "click", "type", "upload", "wait", "screenshot", "close"],
                     },
                     "url": {"type": "string"},
                     "ref": {"type": "string"},
                     "text": {"type": "string"},
+                    "path": {"type": "string"},
+                    "timeout": {"type": "number"},
                 },
                 "required": ["action"],
             },
@@ -116,21 +118,23 @@ SPECS = [
         "function": {
             "name": "computer",
             "description": (
-                "Desktop operator for allowlisted apps and the browser. "
-                "A11y first, pixels last. Every action is verified by re-reading state."
+                "Desktop operator: open, snapshot, click, type, keys, see (visual screen understanding), "
+                "focus (switch window), list_windows, close. A11y first, pixels last. Actions verified."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["open", "snapshot", "click", "type", "keys", "close"],
+                        "enum": ["open", "snapshot", "click", "type", "keys", "close", "see", "focus", "list_windows"],
                     },
                     "app": {"type": "string"},
                     "ref": {"type": "string"},
                     "text": {"type": "string"},
                     "url": {"type": "string"},
                     "expect": {"type": "string"},
+                    "query": {"type": "string"},
+                    "title": {"type": "string"},
                 },
                 "required": ["action"],
             },
@@ -198,6 +202,32 @@ SPECS = [
                 "never writes confirmed facts."
             ),
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "description": (
+                "Ask the user a multiple-choice question when there is ambiguity or a key "
+                "design/implementation decision before proceeding. Do not use for general "
+                "post-implementation questions or chit-chat."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The question to clarify before proceeding with implementation.",
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "2 to 4 distinct options for the user to choose from.",
+                    },
+                },
+                "required": ["question", "options"],
+            },
         },
     },
 ]

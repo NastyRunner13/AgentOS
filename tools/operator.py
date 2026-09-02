@@ -90,8 +90,14 @@ class Operator:
         return json.dumps(result)
 
     async def _execute(self, action: str, app: str, args: dict) -> dict:
-        if action not in {"open", "snapshot", "click", "type", "keys", "close"}:
+        if action not in {"open", "snapshot", "click", "type", "keys", "close", "see", "focus", "list_windows"}:
             return self._item(action, app, path="none", verify_ok=False, detail=f"unknown action {action}")
+        if action == "see":
+            return await self._see(args)
+        if action == "list_windows":
+            return await self._list_windows()
+        if action == "focus":
+            return await self._focus(args)
         if action == "open":
             return await self._open(app, args)
         if not self.allowlisted(app) and action != "snapshot":
@@ -103,6 +109,81 @@ class Operator:
         if action == "close":
             return await self._close(app)
         return await self._act(action, app, args)
+
+    async def _see(self, args: dict) -> dict:
+        query = str(
+            args.get("query")
+            or "Describe in detail what is currently displayed on this screen, including active windows, text, and any dialogs or status messages."
+        ).strip()
+        try:
+            png = await self.pixels.screenshot()
+        except Exception as exc:
+            return self._item("see", self.app, path="pixels", verify_ok=False, detail=f"screenshot failed: {exc}")
+
+        import base64
+
+        b64 = base64.b64encode(png).decode("ascii")
+        if self.registry is None:
+            return self._item("see", self.app, path="pixels", verify_ok=False, detail="vision registry not configured")
+        try:
+            raw, _ = await self.registry.complete(
+                "vision",
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": f"User question about current screen: {query}"},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                        ],
+                    }
+                ],
+            )
+            desc = raw.strip()
+        except Exception as exc:
+            return self._item("see", self.app, path="pixels", verify_ok=False, detail=f"vision inference failed: {exc}")
+
+        item = self._item("see", self.app, path="pixels", verify_ok=True, detail="screen observed")
+        item["observation"] = untrusted("screen_vision", desc)
+        return item
+
+    async def _list_windows(self) -> dict:
+        try:
+            from pywinauto import Desktop
+
+            wins = Desktop(backend="uia").windows()
+            titles = [w.window_text() for w in wins if w.window_text().strip()]
+            item = self._item("list_windows", self.app, path="uia", verify_ok=True, detail=f"{len(titles)} windows")
+            item["windows"] = titles[:20]
+            return item
+        except Exception as exc:
+            return self._item("list_windows", self.app, path="uia", verify_ok=False, detail=str(exc))
+
+    async def _focus(self, args: dict) -> dict:
+        title = str(args.get("title") or args.get("app") or "").strip()
+        if not title:
+            return self._item("focus", self.app, path="none", verify_ok=False, detail="missing window title or app")
+        try:
+            from pywinauto import Desktop
+
+            wins = Desktop(backend="uia").windows()
+            match = None
+            for w in wins:
+                t = w.window_text()
+                if title.lower() in t.lower():
+                    match = w
+                    break
+            if match is None:
+                return self._item("focus", self.app, path="uia", verify_ok=False, detail=f"no window found matching {title!r}")
+            try:
+                match.set_focus()
+            except Exception:
+                pass
+            self.a11y._win = match
+            self.app = match.window_text()
+            return self._item("focus", self.app, path="uia", verify_ok=True, detail=f"focused {self.app!r}")
+        except Exception as exc:
+            return self._item("focus", self.app, path="uia", verify_ok=False, detail=str(exc))
+
 
     async def _open(self, app: str, args: dict) -> dict:
         if not self.allowlisted(app):
