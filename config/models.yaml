@@ -11,6 +11,10 @@ providers:
     headers:
       HTTP-Referer: http://localhost
       X-Title: AgentOS
+  groq:
+    api_key_env: GROQ_API_KEY
+    base_url: https://api.groq.com/openai/v1
+    timeout_seconds: 60
   openai:
     api_key_env: OPENAI_API_KEY
     base_url: https://api.openai.com/v1
@@ -25,6 +29,14 @@ providers:
     timeout_seconds: 120
 
 # Only required when a model is not on default_provider.
+# Example: If default_provider is groq, keep embeddings role on openrouter:
+#   roles:
+#     master: llama-3.3-70b-versatile
+#     fast: llama-3.1-8b-instant
+#     vision: llama-3.2-11b-vision-preview
+#     embeddings:
+#       provider: openrouter
+#       id: nvidia/nemotron-3-embed-1b:free
 models: {}
 
 roles:

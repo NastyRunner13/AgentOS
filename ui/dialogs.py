@@ -142,7 +142,7 @@ def show_provider_dialog(models_cfg: dict[str, Any]) -> None:
         is_default = "●" if name == default_p else ""
         table.add_row(
             name,
-            pcfg.get("kind", "openrouter"),
+            pcfg.get("kind", name),
             pcfg.get("api_key_env", "N/A"),
             is_default,
         )

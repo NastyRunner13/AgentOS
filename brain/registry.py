@@ -5,6 +5,7 @@ from __future__ import annotations
 from brain.anthropic import AnthropicAdapter
 from brain.compat import OnToken
 from brain.fake import FakeAdapter
+from brain.groq import GroqAdapter
 from brain.ollama import OllamaAdapter
 from brain.openai_compat import OpenAICompat
 
@@ -57,6 +58,8 @@ class Registry:
         kind = pcfg.get("kind", provider)
         if kind in ("openrouter", "openai"):
             return OpenAICompat(pcfg)
+        if kind == "groq":
+            return GroqAdapter(pcfg)
         if kind == "anthropic":
             return AnthropicAdapter(pcfg)
         if kind == "ollama":

@@ -34,7 +34,7 @@ Work phases in order. Each ends when its done-condition holds — a phase is com
 
 ### Phase 1 — trustworthy core
 
-Kernel event bus + task manager (concurrent slots, **steer** routing) · model registry (anthropic/openai/ollama/openrouter adapters; roles `master/fast/vision/embeddings`) · master agent with clarify-first scoring and **card** emission · native tools (shell, files) + Playwright browser · SQLite episodic logging · CLI loop (`main.py --cli`).
+Kernel event bus + task manager (concurrent slots, **steer** routing) · model registry (anthropic/openai/ollama/openrouter/groq adapters; roles `master/fast/vision/embeddings`) · master agent with clarify-first scoring and **card** emission · native tools (shell, files) + Playwright browser · SQLite episodic logging · CLI loop (`main.py --cli`).
 
 **DONE WHEN:** from a fresh clone plus configs: (a) a chat round-trip streams through the registry-selected model; (b) two concurrent tasks both accept **steer** messages routed correctly; (c) a ring-2 shell call blocks until a **card** is approved, and executes after approval; (d) every turn writes ≥1 episodic row; (e) swapping `roles.master` in YAML alone changes the responding model.
 
