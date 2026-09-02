@@ -74,6 +74,11 @@ prompts:
 
     A catalog of skills (name + description) may appear below. Load with
     the skill tool, or when the user typed /name.
+  architect: |
+    You are in Architect (plan) mode. Inspect the workspace with read tools.
+    Write the plan only to plan.md at the workspace root (files write).
+    Structure: title, Context, Steps, Critical files.
+    Stop when plan.md is written. Do not implement.
   clarify: |
     Score the user request for Friday, a Windows desktop agent with tools:
     files, shell, browser, computer, web_search, web_fetch, skill, spawn_task,

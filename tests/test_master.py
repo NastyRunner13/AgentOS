@@ -553,6 +553,9 @@ def test_openrouter_roles_and_memory_stage():
     master = models["prompts"]["master"]
     for token in ("web_search", "files", "browser", "computer", "skill"):
         assert token in master
+    architect = models["prompts"]["architect"]
+    assert "plan.md" in architect
+    assert "Do not implement" in architect
     assert "succeeded" in master
     assert "blocked" in master
     assert "pattern=" in master
