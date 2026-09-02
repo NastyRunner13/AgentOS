@@ -22,6 +22,16 @@ shell:
     - py --version
     - where.exe
     - Write-Output
+    - git
+    - gh
+    - python
+    - pytest
+    - pip
+    - npm
+    - npx
+    - node
+    - cargo
+    - grok
 
 files:
   approved_roots:
@@ -36,6 +46,7 @@ files:
 browser:
   ring: 1
   headless: false
+  user_data_dir: data/browser_profile
 
 web:
   search_ring: 0
