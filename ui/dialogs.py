@@ -207,6 +207,7 @@ def show_plugins_dialog(gate: Any = None) -> None:
         "kb_propose": {"kind": "fact"},
         "kb_consolidate": {},
         "spawn_task": {"title": "t", "prompt": "p"},
+        "ask_user": {"question": "", "options": []},
     }
 
     for spec in SPECS:
