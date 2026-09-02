@@ -1,7 +1,7 @@
 # Swap any role's model id to change who answers — no code changes.
 # Unlisted ids use default_provider (OpenRouter unless you change it).
 
-default_provider: openrouter
+default_provider: gemini
 
 providers:
   openrouter:
@@ -15,6 +15,10 @@ providers:
     api_key_env: GROQ_API_KEY
     base_url: https://api.groq.com/openai/v1
     timeout_seconds: 60
+  gemini:
+    api_key_env: GEMINI_API_KEY
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    timeout_seconds: 120
   openai:
     api_key_env: OPENAI_API_KEY
     base_url: https://api.openai.com/v1
@@ -37,12 +41,18 @@ providers:
 #     embeddings:
 #       provider: openrouter
 #       id: nvidia/nemotron-3-embed-1b:free
+# Example: If default_provider is gemini:
+#   roles:
+#     master: gemini-2.5-flash
+#     fast: gemini-2.5-flash
+#     vision: gemini-2.5-flash
+#     embeddings: gemini-embedding-001
 models: {}
 
 roles:
-  master: nvidia/nemotron-3-super-120b-a12b:free
-  fast: nvidia/nemotron-3-super-120b-a12b:free
-  vision: google/gemma-4-26b-a4b-it:free
+  master: gemini-3.1-flash-lite
+  fast: gemini-3.1-flash-lite
+  vision: gemini-3.1-flash-lite
   embeddings: nvidia/nemotron-3-embed-1b:free
 
 prompts:

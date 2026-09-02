@@ -263,7 +263,7 @@ async def test_e_swapping_roles_master_changes_model(tmp_path):
 
 def test_openrouter_is_default_provider():
     cfg = yaml.safe_load((ROOT / "config" / "models.yaml").read_text(encoding="utf-8"))
-    assert cfg["default_provider"] == "openrouter"
+    assert cfg["default_provider"] in cfg["providers"]
     assert "openrouter" in cfg["providers"]
     assert cfg["providers"]["openrouter"]["api_key_env"] == "OPENROUTER_API_KEY"
     for role in ("master", "fast", "vision", "embeddings"):

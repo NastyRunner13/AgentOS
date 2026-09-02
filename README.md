@@ -62,7 +62,7 @@ flowchart TD
     end
 
     subgraph BRAIN["Agent Cognition (brain/)"]
-        REGISTRY["🔌 Model Registry\n(OpenRouter · Groq · Anthropic · Ollama)"]
+        REGISTRY["🔌 Model Registry\n(OpenRouter · Groq · Gemini · Anthropic · Ollama)"]
         MASTER["🧠 Master Agent\n(Recursive Secret Scrub · Turn Loop)"]
         PLANNER["🎯 Milestone Planner\n(resume.json · Maker-Checker)"]
         SKILLS["📚 Skills Loader\n(YAML Frontmatter · Procedural Recipes)"]
@@ -407,7 +407,7 @@ All behavior is declarative. Modify files in `config/` to tune parameters withou
 
 | Configuration File | Controlled Parameters |
 |---|---|
-| [`config/models.yaml`](config/models.yaml) | Provider definitions (OpenRouter, Groq, Anthropic, OpenAI, Ollama), API keys, and model mappings for `master`, `fast`, `vision`, and `embeddings` roles. |
+| [`config/models.yaml`](config/models.yaml) | Provider definitions (OpenRouter, Groq, Gemini, Anthropic, OpenAI, Ollama), API keys, and model mappings for `master`, `fast`, `vision`, and `embeddings` roles. |
 | [`config/permissions.yaml`](config/permissions.yaml) | Tool classification into Rings 0–3, shell command allowlists, filesystem sandboxes, and web fetch restrictions. |
 | [`config/kernel.yaml`](config/kernel.yaml) | Event bus concurrency slots, max tool steps per turn, pre-turn clarify toggles, and data directories. |
 | [`config/memory.yaml`](config/memory.yaml) | Memory stage gate (`0`, `1`, `2`), recall limits, and librarian consolidation parameters. |

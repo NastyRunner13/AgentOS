@@ -51,6 +51,7 @@ def collect_secrets(
     names.append(str(web.get("brave_api_key_env") or "BRAVE_API_KEY"))
     stt = (voice_cfg or {}).get("stt") or {}
     names.append(str(stt.get("api_key_env") or "GROQ_API_KEY"))
+    names.extend(["GEMINI_API_KEY", "GOOGLE_API_KEY"])
     for env in names:
         val = os.environ.get(env)
         if val and val not in seen:
