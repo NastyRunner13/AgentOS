@@ -266,3 +266,27 @@ def test_html_to_text_keeps_structure():
     assert "## API" in text
     assert "- one" in text
     assert "alert(1)" not in text
+
+
+def test_blocked_url_dns_and_schemes():
+    import tools.web as webmod
+
+    assert webmod.blocked_url("file:///etc/passwd") == "blocked scheme file"
+    assert webmod.blocked_url("javascript:alert(1)") == "blocked scheme javascript"
+    assert webmod.blocked_url("http://127.0.0.1/") == "blocked host"
+    assert webmod.blocked_url("http://169.254.169.254/latest/meta-data/") == "blocked host"
+    assert webmod.blocked_url("http://127.0.0.1.nip.io/") == "blocked host"
+
+
+async def test_browser_url_validation_blocks_local_and_file():
+    from tools.browser import Browser
+
+    b = Browser({"browser": {"headless": True}})
+    assert "blocked url: blocked scheme file" in await b.run(
+        {"action": "navigate", "url": "file:///C:/Windows/win.ini"}
+    )
+    assert "blocked url: blocked host" in await b.run(
+        {"action": "navigate", "url": "http://127.0.0.1:9000"}
+    )
+    assert await b.run({"action": "navigate", "url": ""}) == "empty url"
+

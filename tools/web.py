@@ -7,8 +7,9 @@ import ipaddress
 import json
 import os
 import re
+import socket
 from html.parser import HTMLParser
-from urllib.parse import parse_qs, unquote, urlencode, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 
 import httpx
 
@@ -30,6 +31,10 @@ _SPACE_RE = re.compile(r"[ \t]+")
 _BLANK_RE = re.compile(r"\n\s*\n+")
 
 
+def _is_ip_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return bool(ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast)
+
+
 def blocked_url(url: str) -> str | None:
     try:
         parsed = urlparse(url)
@@ -44,10 +49,23 @@ def blocked_url(url: str) -> str | None:
         return "blocked host"
     try:
         ip = ipaddress.ip_address(host)
-    except ValueError:
+        if _is_ip_blocked(ip):
+            return "blocked host"
         return None
-    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-        return "blocked host"
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return None
+    for info in infos:
+        sockaddr = info[4]
+        try:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if _is_ip_blocked(ip):
+                return "blocked host"
+        except ValueError:
+            continue
     return None
 
 
@@ -260,11 +278,25 @@ async def _http(
     data: dict | None = None,
     headers: dict | None = None,
     timeout: float = 20.0,
+    max_redirects: int = 5,
 ) -> tuple[int, str, str]:
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
-        resp = await client.request(method, url, data=data, headers=headers)
-        ctype = resp.headers.get("content-type") or ""
-        return resp.status_code, resp.text, ctype
+    curr_url = url
+    curr_method = method
+    curr_data = data
+    async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+        for _ in range(max_redirects + 1):
+            resp = await client.request(curr_method, curr_url, data=curr_data, headers=headers)
+            if resp.is_redirect and "location" in resp.headers:
+                curr_url = urljoin(curr_url, str(resp.headers["location"]))
+                blocked = blocked_url(curr_url)
+                if blocked:
+                    raise RuntimeError(f"blocked redirect: {blocked}")
+                curr_method = "GET"
+                curr_data = None
+                continue
+            ctype = resp.headers.get("content-type") or ""
+            return resp.status_code, resp.text, ctype
+        raise RuntimeError("too many redirects")
 
 
 async def _search_ddg(query: str, perm_cfg: dict, limit: int) -> tuple[list[dict[str, str]], str]:
