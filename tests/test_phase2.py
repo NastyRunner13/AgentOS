@@ -88,6 +88,9 @@ async def test_d_pixels_only_when_a11y_unusable(tmp_path):
     )
     assert skip["path"] == "a11y"
     assert skip["verified"] is False
+    xy = next(t for t in _scenario(data, "xy_click_explicit")["trace"] if t["action"] == "click")
+    assert xy["path"] == "pixels"
+    assert xy["verified"] is True
 
 
 async def test_low_confidence_ground_does_not_click(tmp_path):

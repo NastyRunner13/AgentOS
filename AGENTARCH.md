@@ -48,6 +48,8 @@ After Phase 1. May run beside Phase 2. Required before Phase 6. One recurring, m
 
 Operator sub-agent: UIA/a11y ladder first, Set-of-Marks screenshots last, **verified** after every action, **stuck → ask** protocol. Allowlist-mode v1 (known apps + browser, single monitor). An app on `operator.allowlist` runs silent (ring 1). An app not on that list still uses `computer` but is ring 2: a **card**, then a process-lifetime session grant — not a write to `permissions.yaml`. Eval harness v1: repeatable scenario suite emitting `{success%, latency, token cost, human interventions, cost per accepted outcome}` per run.
 
+`computer see` captures the primary monitor and the current master turn receives that image (downscaled, 0–1000 axes drawn on it, labeled **untrusted**). `computer click`/`type`/`keys`/`scroll` with `x`,`y` is the explicit pixels path: those numbers are **0–1000 on the attached image** (0,0 top-left, 1000,1000 bottom-right) — Gemini's native computer-use space. The kernel maps `screen_x = x/1000 * width` (and the same for y). Do not ask the model for image-pixel coordinates; mixing the two spaces is how taskbar clicks land on the status bar. After mapping, a point still outside the monitor is not **verified** and must not click. The next attached screenshot marks the last click with a red crosshair. Automatic pixels fallback (vision ground when no `x`,`y`) still fires only when the a11y tree is empty. Full-desktop allowlist removal stays Phase 6.
+
 **DONE WHEN:** (a) the suite runs end-to-end from one command and writes metrics JSON; (b) every operator action in the trace carries a verify result; (c) a deliberately broken scenario terminates via **stuck → ask** with evidence attached rather than retrying; (d) pixels-path fires only when the a11y path returned nothing usable.
 
 ### Phase 3 — memory stages 0→1
@@ -169,7 +171,7 @@ Chat tools and their default rings (`config/permissions.yaml`). Unknown names ar
 | `skill` | 0 | return a SKILL.md body by name |
 | `spawn_task` / `kb_read` | 0 | |
 | `files` write / `browser` / `kb_propose` / `kb_consolidate` | 1 | |
-| `computer` allowlisted app, or `see` / `snapshot` / `list_windows` | 1 | silent launch / screen read |
+| `computer` allowlisted app, or `see` / `snapshot` / `list_windows`, or `click`/`type`/`keys`/`scroll` with `x`,`y` and no app | 1 | silent launch / screen read / coordinate act |
 | `computer` app not on `operator.allowlist` | 2 | **card**. Approval grants that app name for this process only; it does not write `permissions.yaml`. Put the app in the YAML allowlist when it should stay silent after restart. |
 | `shell` allowlisted | 1 | |
 | `shell` other | 2 | **card** |

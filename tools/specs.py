@@ -118,8 +118,11 @@ SPECS = [
         "function": {
             "name": "computer",
             "description": (
-                "Desktop operator: open, snapshot, click, type, keys, see (visual screen understanding), "
-                "focus (switch window), list_windows, close. "
+                "Desktop operator: open, snapshot, click, type, keys, scroll, see (screenshot + vision), "
+                "focus (switch window), list_windows, close. see attaches the screen image. "
+                "Prefer a11y ref. If no ref, pass x,y as 0-1000 on the attached screenshot "
+                "(0,0 top-left, 1000,1000 bottom-right). Do not convert to image pixels. "
+                "Execute only ONE computer action at a time. "
                 "Allowlisted apps run silent. Unknown apps raise a card; after approval the app "
                 "is granted for this process. A11y first, pixels last. Actions verified."
             ),
@@ -128,7 +131,18 @@ SPECS = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["open", "snapshot", "click", "type", "keys", "close", "see", "focus", "list_windows"],
+                        "enum": [
+                            "open",
+                            "snapshot",
+                            "click",
+                            "type",
+                            "keys",
+                            "scroll",
+                            "close",
+                            "see",
+                            "focus",
+                            "list_windows",
+                        ],
                     },
                     "app": {"type": "string"},
                     "ref": {"type": "string"},
@@ -137,6 +151,9 @@ SPECS = [
                     "expect": {"type": "string"},
                     "query": {"type": "string"},
                     "title": {"type": "string"},
+                    "x": {"type": "number", "description": "0-1000, 0=left, 1000=right"},
+                    "y": {"type": "number", "description": "0-1000, 0=top, 1000=bottom"},
+                    "dy": {"type": "number"},
                 },
                 "required": ["action"],
             },

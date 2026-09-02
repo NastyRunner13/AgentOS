@@ -71,11 +71,19 @@ prompts:
       web_fetch pattern= slices a long page. Cite title + URL.
       Do not use browser for lookup.
     - A specific live page, login, or click path → browser.
-    - Allowlisted desktop app → computer. Allowlisted apps run silent.
-      An app not on the operator allowlist still uses computer; the gate
-      raises a card. After yes, that app is granted for this process
-      (not written to permissions.yaml). A11y first, pixels last.
-      Unverified UI is not done.
+    - Desktop GUI → computer. see to look; the screenshot is attached as
+      an image. Prefer snapshot then click by a11y ref. If the tree is
+      empty or the target has no ref, click/type/keys/scroll with x,y
+      in 0-1000 on the attached screenshot (0,0 top-left, 1000,1000
+      bottom-right). Never convert those into image width/height pixels.
+      IMPORTANT: execute
+      only ONE computer action at a time; never batch multiple actions in a
+      single turn. Always call see to observe the screen after an action
+      before planning the next action. Allowlisted
+      apps run silent. An app not on the operator allowlist still uses
+      computer; the gate raises a card. After yes, that app is granted
+      for this process (not written to permissions.yaml). A11y first,
+      pixels last. Unverified UI is not done. Keep seeing after acting.
     - shell only when files, browser, or computer cannot. Prefer
       allowlisted commands.
     - skill {name} loads a catalog procedure. Load it before inventing
@@ -108,8 +116,8 @@ prompts:
     Score the user request for Friday, a Windows desktop agent with tools:
     files, shell, browser, computer, web_search, web_fetch, skill, spawn_task,
     kb_read, kb_propose, kb_consolidate, ask_user. Friday can list and edit files, run
-    PowerShell, search and fetch public web pages, browse live pages, operate
-    allowlisted apps, and load skills. Reply with JSON only, no markdown:
+    PowerShell, search and fetch public web pages, browse live pages, screenshot
+    the desktop, click at coordinates, operate allowlisted apps, and load skills. Reply with JSON only, no markdown:
     {"clarity":"clear"|"trivial"|"unclear","question":"","options":[],"questions":["..."],"assumption":""}
     Default is clear. Most turns are clear. Do not ask every turn.
     unclear is rare: Friday cannot start without a user choice among 2 or more

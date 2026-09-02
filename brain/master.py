@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
+from pathlib import Path
 from typing import Any, Callable
 
 from brain.librarian import draft
@@ -58,7 +60,12 @@ def _flatten_tool_turns(conv: list[dict]) -> list[dict]:
         role = msg.get("role")
         if role == "tool":
             name = msg.get("name") or "tool"
-            out.append({"role": "user", "content": f"[{name} result]\n{msg.get('content') or ''}"})
+            content = msg.get("content") or ""
+            if isinstance(content, list):
+                content = " ".join(
+                    str(p.get("text") or "") for p in content if isinstance(p, dict)
+                )
+            out.append({"role": "user", "content": f"[{name} result]\n{content}"})
         elif role == "assistant" and msg.get("tool_calls"):
             names = [
                 ((tc.get("function") or {}).get("name") or "tool") for tc in msg["tool_calls"]
@@ -86,6 +93,41 @@ def _parse_args(raw: str) -> dict:
         return val if isinstance(val, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+def _attach_screen(conv: list[dict], result: str) -> None:
+    obj = _json_object(result)
+    if not obj:
+        return
+    raw = obj.get("screenshot")
+    if not raw:
+        return
+    path = Path(str(raw))
+    if not path.is_file():
+        return
+    data = path.read_bytes()
+    if not data or len(data) > 4_000_000:
+        return
+    conv.append(
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        '<untrusted source="screen">x,y for computer click/type/keys/scroll '
+                        "are 0-1000 on this image (0,0 top-left, 1000,1000 bottom-right). "
+                        "Do not convert into pixel width/height. "
+                        "A red crosshair is the last click if present.</untrusted>"
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{base64.b64encode(data).decode('ascii')}"},
+                },
+            ],
+        }
+    )
 
 
 class Master:
@@ -306,16 +348,40 @@ class Master:
                 calls,
                 key=lambda c: 0 if (c.get("function") or {}).get("name") == "skill" else 1,
             )
+            executed_gui_action = False
             for call in ordered:
+                fn_name = (call.get("function") or {}).get("name") or ""
+                fn_args = _parse_args((call.get("function") or {}).get("arguments", ""))
+                action = str(fn_args.get("action") or "")
+
+                if executed_gui_action and fn_name == "computer" and action in ("click", "type", "keys", "scroll", "open", "close", "focus"):
+                    result = json.dumps({
+                        "error": "Screen state changed after previous action. Re-inspect screen (see/snapshot) before issuing further actions.",
+                        "verified": False,
+                    })
+                    conv.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.get("id", ""),
+                            "name": fn_name,
+                            "content": self.scrub(result),
+                        }
+                    )
+                    continue
+
                 result = await self._run_tool(call, task)
                 conv.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.get("id", ""),
-                        "name": (call.get("function") or {}).get("name") or "",
+                        "name": fn_name,
                         "content": self.scrub(result),
                     }
                 )
+                if fn_name == "computer":
+                    _attach_screen(conv, result)
+                    if action in ("click", "type", "keys", "scroll", "open", "close", "focus"):
+                        executed_gui_action = True
         return last or "hit max tool steps"
 
     async def _run_tool(self, call: dict, task: Task | None) -> str:

@@ -566,3 +566,106 @@ def test_openrouter_roles_and_memory_stage():
     assert "pattern=" in master
     assert mem["stage"] in (0, 1)
     assert mem["stage"] < 2
+
+
+TINY_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f"
+    b"\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+async def test_computer_see_attaches_screenshot_image(tmp_path: Path):
+    shot = tmp_path / "screen-model.png"
+    shot.write_bytes(TINY_PNG)
+
+    class FakeOp:
+        async def execute(self, args):
+            return json.dumps(
+                {
+                    "action": "see",
+                    "path": "pixels",
+                    "verified": True,
+                    "verify": {"ok": True, "detail": "screen observed"},
+                    "screenshot": str(shot),
+                    "image_size": [1, 1],
+                    "observation": '<untrusted source="screen_vision">desk</untrusted>',
+                }
+            )
+
+    fake = FakeAdapter(
+        {
+            "script": {
+                "fast-a": '{"clarity":"clear"}',
+                "master-a": [
+                    (
+                        "",
+                        [
+                            {
+                                "id": "c1",
+                                "type": "function",
+                                "function": {"name": "computer", "arguments": '{"action":"see"}'},
+                            }
+                        ],
+                    ),
+                    ("I see the desk.", []),
+                ],
+            }
+        }
+    )
+    _bus, _gate, _tasks, _registry, _memory, master = _stack(tmp_path, fake)
+    master.tools.operator = FakeOp()
+    reply = await master.turn("look at the screen")
+    assert reply == "I see the desk."
+    master_calls = [c for c in fake.calls if c[0] == "master-a"]
+    assert len(master_calls) >= 2
+    blob = json.dumps(master_calls[1][1])
+    assert "image_url" in blob
+    assert "data:image/png;base64," in blob
+    assert "0-1000" in blob
+
+
+async def test_master_stops_blind_computer_batch_calls(tmp_path: Path):
+    class FakeOp:
+        def __init__(self):
+            self.clicks = []
+
+        async def execute(self, args):
+            if args.get("action") == "click":
+                self.clicks.append((args.get("x"), args.get("y")))
+                return json.dumps({"action": "click", "verified": True, "x": args.get("x"), "y": args.get("y")})
+            return json.dumps({"action": "see", "verified": True})
+
+    op = FakeOp()
+    fake = FakeAdapter(
+        {
+            "script": {
+                "fast-a": '{"clarity":"clear"}',
+                "master-a": [
+                    (
+                        "",
+                        [
+                            {
+                                "id": "c1",
+                                "type": "function",
+                                "function": {"name": "computer", "arguments": '{"action":"click","x":100,"y":200}'},
+                            },
+                            {
+                                "id": "c2",
+                                "type": "function",
+                                "function": {"name": "computer", "arguments": '{"action":"click","x":300,"y":400}'},
+                            },
+                        ],
+                    ),
+                    ("Done with first click.", []),
+                ],
+            }
+        }
+    )
+    _bus, _gate, _tasks, _registry, _memory, master = _stack(tmp_path, fake)
+    master.tools.operator = op
+    reply = await master.turn("click button then click another")
+    assert reply == "Done with first click."
+    # Only the first click should have executed; the second was blocked from blind execution
+    assert op.clicks == [(100, 200)]
+

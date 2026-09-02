@@ -329,7 +329,7 @@ flowchart LR
 ```
 
 1. **Accessibility First (A11y/UIA):** Friday inspects the Windows UI Automation accessibility tree to locate buttons, text boxes, and menus by name and control type.
-2. **Pixels & Set-of-Marks Fallback:** For custom-rendered interfaces or games without accessibility trees, Friday captures a high-resolution screenshot, overlays numbered bounding boxes (Set-of-Marks), and uses visual perception (`computer see`) to act.
+2. **Pixels & Set-of-Marks Fallback:** For custom-rendered interfaces or games without accessibility trees, Friday captures a screenshot (`computer see`), attaches it to the turn as an image, and clicks `x`,`y` in that image's pixels. Automatic Set-of-Marks grounding still runs only when the a11y tree is empty.
 3. **Persistent Browser Sessions:** Playwright operates with a persistent user profile directory (`data/browser_profile`) to preserve cookies, sessions, and credentials across runs, with optional live CDP attachment to existing Chrome instances.
 
 ---

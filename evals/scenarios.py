@@ -76,6 +76,7 @@ class CapturingPixels:
         self.shots = 0
         self.clicks: list[tuple[int, int]] = []
         self.typed: list[str] = []
+        self.scrolls: list[tuple[int, int, int]] = []
         self.annotated = 0
         self.on_click = None
 
@@ -91,6 +92,9 @@ class CapturingPixels:
         self.clicks.append((int(x), int(y)))
         if self.on_click:
             self.on_click()
+
+    async def scroll_xy(self, x: int, y: int, dy: int) -> None:
+        self.scrolls.append((int(x), int(y), int(dy)))
 
     async def type_text(self, text: str) -> None:
         self.typed.append(text)
@@ -191,6 +195,23 @@ async def stuck_on_broken_verify(root: Path) -> ScenarioResult:
         trace=list(op.trace),
         error=None if ok else json.dumps(last),
     )
+
+
+async def xy_click_explicit(root: Path) -> ScenarioResult:
+    a11y = ScriptedA11y([Node("e1", "button", "OK")])
+    pixels = CapturingPixels()
+    op = _operator(root, a11y, pixels)
+    raw = await op.execute({"action": "click", "x": 40, "y": 80})
+    last = _load(raw)
+    ok = (
+        last["path"] == "pixels"
+        and last["verified"] is True
+        and pixels.clicks == [(40, 80)]
+        and not a11y.clicks
+        and last.get("x") == 40
+        and last.get("y") == 80
+    )
+    return ScenarioResult("xy_click_explicit", ok, trace=list(op.trace))
 
 
 async def pixels_skipped_when_a11y_usable(root: Path) -> ScenarioResult:
@@ -516,6 +537,7 @@ def default_suite(root: Path) -> list:
     return [
         bind(a11y_click_verified, "a11y_click_verified"),
         bind(pixels_when_a11y_empty, "pixels_when_a11y_empty"),
+        bind(xy_click_explicit, "xy_click_explicit"),
         bind(stuck_on_broken_verify, "stuck_on_broken_verify"),
         bind(pixels_skipped_when_a11y_usable, "pixels_skipped_when_a11y_usable"),
         bind(allowlist_rejects_unknown, "allowlist_rejects_unknown"),
