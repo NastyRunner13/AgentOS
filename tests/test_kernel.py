@@ -107,6 +107,7 @@ def test_every_spec_has_explicit_ring():
         "kb_read": 0,
         "kb_propose": 1,
         "kb_consolidate": 1,
+        "ask_user": 0,
     }
     assert names == set(expected), names
     args = {
@@ -117,6 +118,8 @@ def test_every_spec_has_explicit_ring():
         "kind": "fact",
         "url": "https://example.com",
         "name": "x",
+        "question": "Which db?",
+        "options": ["sqlite", "postgres"],
     }
     for name, ring in expected.items():
         assert gate.classify(name, args) == ring, name
@@ -132,6 +135,12 @@ def test_shell_allowlist_and_other():
     assert gate.classify("shell", {"command": "echo hi"}) == 1
     assert gate.classify("shell", {"command": "Get-Date"}) == 1
     assert gate.classify("shell", {"command": "Write-Host pwned"}) == 2
+    assert gate.classify("shell", {"command": "echo hi; Write-Host pwned"}) == 2
+    assert gate.classify("shell", {"command": "echo hi & calc.exe"}) == 2
+    assert gate.classify("shell", {"command": "echo hi | iex"}) == 2
+    assert gate.classify("shell", {"command": "echo hi\ncalc.exe"}) == 2
+    assert gate.classify("shell", {"command": "echo $(calc.exe)"}) == 2
+    assert gate.classify("shell", {"command": "echo `calc.exe`"}) == 2
 
 
 def test_files_rings_and_delete_threshold():
@@ -140,6 +149,10 @@ def test_files_rings_and_delete_threshold():
     assert gate.classify("files", {"action": "write", "path": "a.txt"}) == 1
     assert gate.classify("files", {"action": "delete", "path": "a.txt", "_size": 1}) == 2
     assert gate.classify("files", {"action": "delete", "path": "a.txt", "_size": 2_000_000}) == 3
+    assert gate.classify("files", {"action": "write", "path": ".env"}) == 2
+    assert gate.classify("files", {"action": "write", "path": "config/permissions.yaml"}) == 2
+    assert gate.classify("files", {"action": "write", "path": "kernel/gate.py"}) == 2
+    assert gate.classify("files", {"action": "move", "path": "a.txt", "dest": "main.py"}) == 2
 
 
 def test_gate_preview():
@@ -149,6 +162,7 @@ def test_gate_preview():
     assert "site:docs.python.org" in gate.preview(
         "web_search", {"query": "asyncio", "site": "docs.python.org"}
     )
+    assert "Which database?" in gate.preview("ask_user", {"question": "Which database?"})
 
 
 async def test_card_expiry_denies():
@@ -170,3 +184,32 @@ async def test_resolve_unknown_and_double():
     assert gate.resolve(card["id"], True) is False
     assert gate.resolve("missing", True) is False
     assert await asyncio.wait_for(task, 2) is True
+
+
+async def test_gate_ask_question_card():
+    gate = Gate(_perm(), Bus())
+    cards = gate.bus.subscribe("approval.request")
+    resolved_sub = gate.bus.subscribe("approval.resolved")
+    task = asyncio.create_task(
+        gate.ask("Which database?", ["SQLite", "PostgreSQL"], allow_custom=True)
+    )
+    card = await asyncio.wait_for(cards.get(), 2)
+    assert card["kind"] == "question"
+    assert card["question"] == "Which database?"
+    assert card["options"] == ["SQLite", "PostgreSQL"]
+    assert card["allow_custom"] is True
+    assert card["ring"] == 0
+
+    assert gate.resolve(card["id"], "PostgreSQL") is True
+    answer = await asyncio.wait_for(task, 2)
+    assert answer == "PostgreSQL"
+    res_ev = resolved_sub.get_nowait()
+    assert res_ev["id"] == card["id"]
+    assert res_ev["approved"] is True
+    assert res_ev["answer"] == "PostgreSQL"
+
+
+async def test_gate_ask_expiry_default():
+    gate = Gate(_perm(**{"card": {"expiry_seconds": 0}}), Bus())
+    answer = await gate.ask("Which port?", ["8080", "3000"], timeout=0.01)
+    assert answer == "8080"
