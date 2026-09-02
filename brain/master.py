@@ -5,13 +5,19 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Callable
+from typing import Any, Callable
 
 from brain.librarian import draft
 from brain.registry import Registry
 from kernel import Bus, Gate, Task, TaskManager
 from memory import Episodic
 from tools import SPECS, NativeTools
+from tools.files import is_plan_path
+
+ARCHITECT_TOOLS = frozenset(
+    {"files", "web_search", "web_fetch", "kb_read", "skill", "ask_user"}
+)
+ARCHITECT_BLOCK = "architect mode forbids this tool; write only plan.md"
 
 OnToken = Callable[[str], None]
 
@@ -98,6 +104,7 @@ class Master:
         max_tool_steps: int = 8,
         secrets: list[str] | None = None,
         skills: list | None = None,
+        architect_prompt: str = "",
     ) -> None:
         self.registry = registry
         self.gate = gate
@@ -107,11 +114,14 @@ class Master:
         self.bus = bus
         self.system_prompt = system_prompt
         self.clarify_prompt = clarify_prompt
+        self.architect_prompt = architect_prompt
         self.clarify = clarify
         self.max_tool_steps = max_tool_steps
         self.secrets = [s for s in (secrets or []) if s]
         self.skills = skills or []
         self.history: list[dict] = []
+        self.mode = "Code"
+        self._turn_mode = "Code"
         self._awaiting_clarify = False
         self._active_skill = None
 
@@ -150,7 +160,12 @@ class Master:
         on_token: OnToken | None = None,
         *,
         skip_clarify: bool = False,
+        mode: str | None = None,
     ) -> str:
+        if task is not None and mode is None:
+            self._turn_mode = "Code"
+        else:
+            self._turn_mode = mode or self.mode or "Code"
         text = self.scrub(text)
         self.memory.write("turn", content=text, role="user", meta={"task_id": task.id if task else None})
         self.bus.publish("agent.state", {"phase": "thinking", "task_id": task.id if task else None})
@@ -224,6 +239,8 @@ class Master:
 
     def _system_with_facts(self, query: str) -> str:
         prompt = self.system_prompt
+        if (self._turn_mode or "").lower() == "architect" and self.architect_prompt:
+            prompt = f"{prompt}\n\n{self.architect_prompt}"
         if hasattr(self.tools, "root") and self.tools.root:
             prompt = f"{prompt}\n\nCurrent workspace root directory: {self.tools.root}"
         if self.skills:
@@ -316,12 +333,17 @@ class Master:
                 "task_id": task.id if task else None,
             },
         )
+        blocked = ""
         if (
             self._active_skill
             and self._active_skill.allowed_tools
             and name not in self._active_skill.allowed_tools
         ):
-            result = "skill forbids this tool"
+            blocked = "skill forbids this tool"
+        else:
+            blocked = self._architect_blocks(name, args)
+        if blocked:
+            result = blocked
             self.memory.write("tool", content=self.scrub(result), role=name, meta={"args": self.scrub_obj(args), "denied": True})
             self.bus.publish(
                 "tool.result",
@@ -386,6 +408,20 @@ class Master:
             },
         )
         return result
+
+    def _architect_blocks(self, name: str, args: dict) -> str:
+        if (self._turn_mode or "").lower() != "architect":
+            return ""
+        if name not in ARCHITECT_TOOLS:
+            return ARCHITECT_BLOCK
+        if name != "files":
+            return ""
+        action = str(args.get("action") or "read")
+        if action in ("read", "search"):
+            return ""
+        if action == "write" and is_plan_path(str(args.get("path") or ""), self.tools.root):
+            return ""
+        return ARCHITECT_BLOCK
 
     def _load_skill(self, name: str) -> str:
         from brain.skills import find_skill
