@@ -209,9 +209,9 @@ SPECS = [
         "function": {
             "name": "ask_user",
             "description": (
-                "Ask the user a multiple-choice question when there is ambiguity or a key "
-                "design/implementation decision before proceeding. Do not use for general "
-                "post-implementation questions or chit-chat."
+                "Ask only when a fork blocks the turn: 2 or more mutually exclusive next "
+                "actions, no safe default, tools cannot resolve it. Do not use for stack, "
+                "style, architecture, plan confirmation, or follow-ups."
             ),
             "parameters": {
                 "type": "object",

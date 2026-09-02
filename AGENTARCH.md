@@ -140,12 +140,14 @@ Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`
 
 ### Clarify-first
 
-`config/kernel.yaml` `clarify` (default true) scores each chat turn with `fast` before master. Prompt: `config/models.yaml` `prompts.clarify`.
+`config/kernel.yaml` `clarify` (default true) scores each chat turn with `fast` before master. Prompt: `config/models.yaml` `prompts.clarify`. Default is act, not ask. Do not ask every turn.
 
 - Input: current user text plus the last 3 foreground `history` turns. No tools on the scorer.
-- `unclear` is only a missing user choice that would change the action (which path, which app, which person). Friday already has `files`, `shell`, `browser`, `computer`, `web_search`, `web_fetch`, `skill`, and kb tools. An omitted path is the working directory. "Look up X" / "research Y" is **clear**.
+- Default is `clear`. Underspecified is not unclear. Friday already has `files`, `shell`, `browser`, `computer`, `web_search`, `web_fetch`, `skill`, and kb tools.
+- `unclear` is rare: Friday cannot start without a user choice among 2 or more mutually exclusive next actions, and no safe default exists (which person, which of two named apps, which of two existing folders). Architecture, stack, library, style, how to implement, omitted path, research, review, and follow-ups are `clear` or `trivial`. An omitted path is the working directory. "Look up X" / "research Y" is **clear**.
 - `unclear` asks at most 3 questions, writes them to L2 and `history`, and returns without master. The next foreground user turn skips the scorer and runs master with that `history`.
 - `trivial` appends `[assumption]` and continues to master. `clear` continues.
+- Mid-turn `ask_user` uses the same bar. Do not use it to pick a stack, confirm a plan, or ask follow-ups after finishing. Operator **stuck** (two failed verifications) still asks with evidence.
 - Background **task** turns still score; they neither set nor consume the skip, and they do not receive CLI `history`.
 
 ### Permission rings
@@ -197,7 +199,7 @@ Triggers in trust order: active suggestion after novel multi-step success → ex
 
 Versioned source of truth, one file per concern: `models.yaml`, `voice.yaml`, `permissions.yaml`, `memory.yaml`, `mcp_servers.json`, `voice.yaml` latency budget. Behavior changes ship as config diffs wherever possible; schema changes require updating the matching section here in the same commit.
 
-`models.yaml` `prompts.master` teaches tool choice (files vs `web_search`/`web_fetch` vs `browser` vs `computer` vs `shell` vs `skill`) and forbids claiming success without a tool result. `prompts.architect` is appended in Architect (inspect, write only `plan.md`, stop). `prompts.clarify` lists the same tools; research asks are **clear**.
+`models.yaml` `prompts.master` teaches tool choice (files vs `web_search`/`web_fetch` vs `browser` vs `computer` vs `shell` vs `skill`) and forbids claiming success without a tool result. `ask_user` is only a fork with no default, not every turn. `prompts.architect` is appended in Architect (inspect, write only `plan.md`, stop). `prompts.clarify` lists the same tools; default is **clear**; `unclear` is a rare fork with no default. Research asks are **clear**.
 
 OpenAI-compatible chat fills `tool_call` ids when the model omitted them, and sends empty assistant `content` as null. If the provider errors after a tool result (404/400 — common on some OpenRouter `:free` Nvidia endpoints that accept the first tool call then reject `role=tool`), master retries once with tools flattened to text so the turn still answers.
 

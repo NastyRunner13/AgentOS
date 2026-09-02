@@ -550,9 +550,14 @@ def test_openrouter_roles_and_memory_stage():
     assert "web_fetch" in clarify
     assert "skill" in clarify
     assert "working directory" in clarify
+    assert "Default is clear" in clarify
+    assert "mutually exclusive" in clarify
+    assert "Do not ask every turn" in clarify
     master = models["prompts"]["master"]
     for token in ("web_search", "files", "browser", "computer", "skill"):
         assert token in master
+    assert "Do not ask every turn" in master
+    assert "ask_user only when a fork blocks the turn" in master
     architect = models["prompts"]["architect"]
     assert "plan.md" in architect
     assert "Do not implement" in architect

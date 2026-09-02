@@ -17,9 +17,17 @@ from kernel import Bus, Gate, TaskManager
 from memory import Episodic
 from tests.test_phase1 import _stack
 from tools import NativeTools
+from tools.specs import SPECS
 from ui.renderer import render_card, render_question_card
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_ask_user_spec_is_fork_only():
+    spec = next(s["function"] for s in SPECS if s["function"]["name"] == "ask_user")
+    desc = spec["description"]
+    assert "fork blocks the turn" in desc
+    assert "Do not use for stack" in desc
 
 
 def test_render_question_card_output():

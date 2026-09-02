@@ -181,7 +181,7 @@ sequenceDiagram
 
 ### 2. Interactive Clarification & Choice Cards
 
-When a request is ambiguous or requires architectural decisions, Friday does not guess or hallucinate. It triggers an **interactive Question Card**.
+When a request cannot proceed without a fork (which person, which of two named apps) and there is no safe default, Friday triggers an **interactive Question Card**. Architecture, stack, and how to implement are not that fork. Friday chooses and continues.
 
 1. **Pre-Turn Clarification:** The fast model checks user intent. If unclear, it emits 2–4 structured choices with an optional custom write-in.
 2. **Mid-Turn Clarification (`ask_user` Tool):** During execution, the agent can call `ask_user` to pause execution, present trade-offs, and wait for human steering.
