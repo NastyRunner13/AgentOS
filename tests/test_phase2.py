@@ -106,6 +106,19 @@ async def test_low_confidence_ground_does_not_click(tmp_path):
     assert item["evidence"]
 
 
+async def test_session_grant_lets_operator_open_unknown(tmp_path):
+    grants: set[str] = set()
+    a11y = ScriptedA11y()
+    op = _operator(tmp_path, a11y, CapturingPixels(), session_grants=grants)
+    denied = json.loads(await op.execute({"action": "open", "app": "steam"}))
+    assert denied["verified"] is False
+    assert a11y.opened == []
+    grants.add("steam")
+    opened = json.loads(await op.execute({"action": "open", "app": "steam"}))
+    assert opened["verified"] is True
+    assert a11y.opened == ["steam"]
+
+
 async def test_computer_tool_dispatches(tmp_path):
     a11y = ScriptedA11y([Node("e1", "button", "OK")])
     orig = a11y.click

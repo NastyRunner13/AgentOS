@@ -155,6 +155,53 @@ def test_files_rings_and_delete_threshold():
     assert gate.classify("files", {"action": "move", "path": "a.txt", "dest": "main.py"}) == 2
 
 
+def test_computer_allowlisted_silent_unknown_card():
+    gate = Gate(_perm(), Bus())
+    assert gate.classify("computer", {"action": "open", "app": "notepad"}) == 1
+    assert gate.classify("computer", {"action": "open", "app": "Notepad"}) == 1
+    assert gate.classify("computer", {"action": "see", "query": "what"}) == 1
+    assert gate.classify("computer", {"action": "snapshot", "app": "steam"}) == 1
+    assert gate.classify("computer", {"action": "list_windows"}) == 1
+    assert gate.classify("computer", {"action": "click", "x": 10, "y": 20}) == 1
+    assert gate.classify("computer", {"action": "scroll", "x": 10, "y": 20, "dy": -120}) == 1
+    assert gate.classify("computer", {"action": "open", "app": "steam"}) == 2
+    assert gate.classify("computer", {"action": "click", "app": "notion"}) == 2
+    assert gate.classify("computer", {"action": "click", "app": "notion", "x": 1, "y": 2}) == 2
+    assert "@40,80" in gate.preview("computer", {"action": "click", "x": 40, "y": 80})
+    preview = gate.preview("computer", {"action": "open", "app": "steam"})
+    assert "steam" in preview
+    assert "not on operator allowlist" in preview
+    assert "not on operator allowlist" not in gate.preview(
+        "computer", {"action": "open", "app": "notepad"}
+    )
+
+
+async def test_computer_unknown_approve_grants_session():
+    grants: set[str] = set()
+    gate = Gate(_perm(), Bus(), session_grants=grants)
+    cards = gate.bus.subscribe("approval.request")
+    task = asyncio.create_task(gate.check("computer", {"action": "open", "app": "steam"}))
+    card = await asyncio.wait_for(cards.get(), 2)
+    assert card["ring"] == 2
+    assert gate.resolve(card["id"], True)
+    assert await asyncio.wait_for(task, 2) is True
+    assert "steam" in grants
+    assert gate.classify("computer", {"action": "click", "app": "steam"}) == 1
+    assert gate.classify("computer", {"action": "open", "app": "Steam"}) == 1
+
+
+async def test_computer_unknown_deny_does_not_grant():
+    grants: set[str] = set()
+    gate = Gate(_perm(), Bus(), session_grants=grants)
+    cards = gate.bus.subscribe("approval.request")
+    task = asyncio.create_task(gate.check("computer", {"action": "open", "app": "steam"}))
+    card = await asyncio.wait_for(cards.get(), 2)
+    assert gate.resolve(card["id"], False)
+    assert await asyncio.wait_for(task, 2) is False
+    assert "steam" not in grants
+    assert gate.classify("computer", {"action": "open", "app": "steam"}) == 2
+
+
 def test_gate_preview():
     gate = Gate(_perm(), Bus())
     assert "pwned" in gate.preview("shell", {"command": "pwned"})

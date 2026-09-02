@@ -46,7 +46,7 @@ After Phase 1. May run beside Phase 2. Required before Phase 6. One recurring, m
 
 ### Phase 2 — reliability layer
 
-Operator sub-agent: UIA/a11y ladder first, Set-of-Marks screenshots last, **verified** after every action, **stuck → ask** protocol. Allowlist-mode v1 (known apps + browser, single monitor). Eval harness v1: repeatable scenario suite emitting `{success%, latency, token cost, human interventions, cost per accepted outcome}` per run.
+Operator sub-agent: UIA/a11y ladder first, Set-of-Marks screenshots last, **verified** after every action, **stuck → ask** protocol. Allowlist-mode v1 (known apps + browser, single monitor). An app on `operator.allowlist` runs silent (ring 1). An app not on that list still uses `computer` but is ring 2: a **card**, then a process-lifetime session grant — not a write to `permissions.yaml`. Eval harness v1: repeatable scenario suite emitting `{success%, latency, token cost, human interventions, cost per accepted outcome}` per run.
 
 **DONE WHEN:** (a) the suite runs end-to-end from one command and writes metrics JSON; (b) every operator action in the trace carries a verify result; (c) a deliberately broken scenario terminates via **stuck → ask** with evidence attached rather than retrying; (d) pixels-path fires only when the a11y path returned nothing usable.
 
@@ -156,7 +156,7 @@ Bus topics every client may subscribe: `agent.state`, `task.update`, `tool.call`
 |---|---|---|
 | 0 | reads: screen, files, web fetch | silent |
 | 1 | app launch, writes in approved roots, browser actions | silent, logged |
-| 2 | shell outside allowlist, installs | **card**, scoped grants allowed |
+| 2 | shell outside allowlist, installs, `computer` on an app not on `operator.allowlist` | **card**, scoped grants allowed |
 | 3 | deletes above threshold, purchases, sends, credentials | explicit confirm, no scope grants |
 
 Chat tools and their default rings (`config/permissions.yaml`). Unknown names are ring 2.
@@ -168,7 +168,9 @@ Chat tools and their default rings (`config/permissions.yaml`). Unknown names ar
 | `web_fetch` | 0 | HTTP GET `http:`/`https:` only; block localhost and private IPs (127/10/172.16–31/192.168); HTML extracted to text (headings, lists, code kept); optional `pattern` returns matching slices; wrapped **untrusted**; truncated to `tool_result_max_chars` |
 | `skill` | 0 | return a SKILL.md body by name |
 | `spawn_task` / `kb_read` | 0 | |
-| `files` write / `browser` / `computer` / `kb_propose` / `kb_consolidate` | 1 | |
+| `files` write / `browser` / `kb_propose` / `kb_consolidate` | 1 | |
+| `computer` allowlisted app, or `see` / `snapshot` / `list_windows` | 1 | silent launch / screen read |
+| `computer` app not on `operator.allowlist` | 2 | **card**. Approval grants that app name for this process only; it does not write `permissions.yaml`. Put the app in the YAML allowlist when it should stay silent after restart. |
 | `shell` allowlisted | 1 | |
 | `shell` other | 2 | **card** |
 | `files` delete | 2–3 | size threshold |

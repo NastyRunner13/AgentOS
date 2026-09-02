@@ -60,6 +60,7 @@ web:
 
 operator:
   ring: 1
+  ring_other: 2
   max_verify_failures: 2
   min_ground_confidence: 0.5
   allowlist:

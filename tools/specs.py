@@ -119,7 +119,9 @@ SPECS = [
             "name": "computer",
             "description": (
                 "Desktop operator: open, snapshot, click, type, keys, see (visual screen understanding), "
-                "focus (switch window), list_windows, close. A11y first, pixels last. Actions verified."
+                "focus (switch window), list_windows, close. "
+                "Allowlisted apps run silent. Unknown apps raise a card; after approval the app "
+                "is granted for this process. A11y first, pixels last. Actions verified."
             ),
             "parameters": {
                 "type": "object",

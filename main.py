@@ -79,7 +79,8 @@ def boot(root: Path):
     voice_cfg = load_yaml(voice_path) if voice_path.is_file() else {}
     bus = Bus()
     slots = int(kernel_cfg.get("concurrent_slots", 4))
-    gate = Gate(perm_cfg, bus)
+    session_grants: set[str] = set()
+    gate = Gate(perm_cfg, bus, session_grants=session_grants)
     tasks = TaskManager(bus, concurrent_slots=slots)
     registry = Registry(models_cfg)
     data_dir = root / str(kernel_cfg.get("data_dir", "data"))
@@ -96,6 +97,7 @@ def boot(root: Path):
         root,
         registry=registry,
         tools=tools,
+        session_grants=session_grants,
     )
     prompts = models_cfg.get("prompts") or {}
     custom_skills_dir = kernel_cfg.get("skills_dir")
@@ -903,6 +905,10 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
                 master.clarify_prompt = str(prompts.get("clarify") or master.clarify_prompt)
                 master.architect_prompt = str(prompts.get("architect") or master.architect_prompt)
                 master.tools.perm_cfg = stack["perm_cfg"]
+                if master.tools.operator is not None:
+                    master.tools.operator.perm = stack["perm_cfg"]
+                    if getattr(master.tools.operator, "a11y", None) is not None:
+                        master.tools.operator.a11y.perm = stack["perm_cfg"]
                 vpath = cfg_dir / "voice.yaml"
                 if vpath.is_file():
                     stack["voice_cfg"] = load_yaml(vpath)

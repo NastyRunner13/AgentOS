@@ -25,6 +25,7 @@ def _perm(root: Path) -> dict:
             "min_ground_confidence": 0.5,
             "allowlist": {"notepad": {"exe": "notepad.exe"}, "browser": {"kind": "playwright"}},
             "ring": 1,
+            "ring_other": 2,
         },
         "card": {"expiry_seconds": 300, "expire_action": "deny"},
         "shell": {"ring_other": 2, "allowlist": ["echo"]},
@@ -95,10 +96,19 @@ class CapturingPixels:
         self.typed.append(text)
 
 
-def _operator(root: Path, a11y, pixels, ground=None) -> Operator:
+def _operator(root: Path, a11y, pixels, ground=None, session_grants=None) -> Operator:
     bus = Bus()
     memory = Episodic(root / "events.db")
-    return Operator(_perm(root), bus, memory, root, a11y=a11y, pixels=pixels, ground=ground)
+    return Operator(
+        _perm(root),
+        bus,
+        memory,
+        root,
+        a11y=a11y,
+        pixels=pixels,
+        ground=ground,
+        session_grants=session_grants,
+    )
 
 
 def _load(raw: str) -> dict:
@@ -202,6 +212,47 @@ async def allowlist_rejects_unknown(root: Path) -> ScenarioResult:
     last = _load(raw)
     ok = last["verified"] is False and not a11y.opened and "allowlist" in last["verify"]["detail"]
     return ScenarioResult("allowlist_rejects_unknown", ok, trace=list(op.trace))
+
+
+async def unknown_app_card_then_grant(root: Path) -> ScenarioResult:
+    grants: set[str] = set()
+    perm = _perm(root)
+    bus = Bus()
+    gate = Gate(perm, bus, session_grants=grants)
+    a11y = ScriptedA11y()
+    op = Operator(
+        perm,
+        bus,
+        Episodic(root / "events.db"),
+        root,
+        a11y=a11y,
+        pixels=CapturingPixels(),
+        session_grants=grants,
+    )
+    blocked = _load(await op.execute({"action": "open", "app": "steam"}))
+    cards = bus.subscribe("approval.request")
+    task = asyncio.create_task(gate.check("computer", {"action": "open", "app": "steam"}))
+    card = await asyncio.wait_for(cards.get(), 2)
+    gate.resolve(card["id"], True)
+    allowed = await asyncio.wait_for(task, 2)
+    opened = _load(await op.execute({"action": "open", "app": "steam"}))
+    ok = (
+        blocked["verified"] is False
+        and "allowlist" in blocked["verify"]["detail"]
+        and card["ring"] == 2
+        and allowed is True
+        and "steam" in grants
+        and opened["verified"] is True
+        and a11y.opened == ["steam"]
+        and gate.classify("computer", {"action": "click", "app": "steam"}) == 1
+    )
+    return ScenarioResult(
+        "unknown_app_card_then_grant",
+        ok,
+        human_interventions=1,
+        trace=list(op.trace),
+        error=None if ok else json.dumps({"blocked": blocked, "opened": opened, "grants": list(grants)}),
+    )
 
 
 async def file_write_roundtrip(root: Path) -> ScenarioResult:
@@ -468,6 +519,7 @@ def default_suite(root: Path) -> list:
         bind(stuck_on_broken_verify, "stuck_on_broken_verify"),
         bind(pixels_skipped_when_a11y_usable, "pixels_skipped_when_a11y_usable"),
         bind(allowlist_rejects_unknown, "allowlist_rejects_unknown"),
+        bind(unknown_app_card_then_grant, "unknown_app_card_then_grant"),
         bind(file_write_roundtrip, "file_write_roundtrip"),
         bind(ring2_card_blocks, "ring2_card_blocks"),
         bind(memory_recall_after_n, "memory_recall_after_n"),

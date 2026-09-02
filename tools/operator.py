@@ -49,6 +49,7 @@ class Operator:
         ground: Ground | None = None,
         registry: Any = None,
         tools: Any = None,
+        session_grants: set[str] | None = None,
     ) -> None:
         op = perm.get("operator") or {}
         self.perm = perm
@@ -58,6 +59,7 @@ class Operator:
         self.allowlist = dict(op.get("allowlist") or {})
         self.max_fails = int(op.get("max_verify_failures", 2))
         self.min_conf = float(op.get("min_ground_confidence", 0.5))
+        self.session_grants = session_grants if session_grants is not None else set()
         self.a11y = a11y or LiveA11y(tools, perm)
         self.pixels = pixels or LivePixels(self.root / "data")
         self.ground = ground
@@ -69,7 +71,10 @@ class Operator:
         self._stuck_payload: dict = {}
 
     def allowlisted(self, app: str) -> bool:
-        return app in self.allowlist or app in BROWSER_APPS
+        key = (app or "").strip().lower()
+        allow = (self.perm.get("operator") or {}).get("allowlist") or self.allowlist
+        names = {str(k).lower() for k in allow}
+        return key in names or key in BROWSER_APPS or key in self.session_grants
 
     async def execute(self, args: dict) -> str:
         action = str(args.get("action") or "")

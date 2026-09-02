@@ -60,7 +60,12 @@ class LiveA11y:
         self._pyapp = None
 
     def _spec(self, app: str) -> dict:
-        return dict((self.perm.get("operator") or {}).get("allowlist") or {}).get(app) or {}
+        allow = dict((self.perm.get("operator") or {}).get("allowlist") or {})
+        key = (app or "").strip().lower()
+        for name, spec in allow.items():
+            if str(name).lower() == key:
+                return dict(spec or {})
+        return {}
 
     async def open(self, app: str, url: Any = None) -> None:
         self.app = app
@@ -74,8 +79,15 @@ class LiveA11y:
 
         self.kind = "uia"
         exe = str(self._spec(app).get("exe") or f"{app}.exe")
-        self._pyapp = Application(backend="uia").start(exe)
+        try:
+            self._pyapp = Application(backend="uia").connect(path=exe, timeout=3)
+        except Exception:
+            self._pyapp = Application(backend="uia").start(exe)
         self._win = self._pyapp.top_window()
+        try:
+            self._win.set_focus()
+        except Exception:
+            pass
 
     async def snapshot(self, app: str) -> list[Node]:
         if self.kind == "browser" or app in BROWSER_APPS:

@@ -9,11 +9,12 @@ from kernel.bus import Bus, new_id
 
 
 class Gate:
-    def __init__(self, cfg: dict, bus: Bus) -> None:
+    def __init__(self, cfg: dict, bus: Bus, session_grants: set[str] | None = None) -> None:
         self.cfg = cfg
         self.bus = bus
         self._pending: dict[str, asyncio.Future] = {}
         self._cards: dict[str, dict] = {}
+        self.session_grants = session_grants if session_grants is not None else set()
 
     def classify(self, tool: str, args: dict) -> int:
         if tool == "shell":
@@ -23,7 +24,7 @@ class Gate:
         if tool == "browser":
             return int(self.cfg.get("browser", {}).get("ring", 1))
         if tool == "computer":
-            return int(self.cfg.get("operator", {}).get("ring", 1))
+            return self._computer_ring(args)
         if tool == "web_search":
             return int(self.cfg.get("web", {}).get("search_ring", 0))
         if tool == "web_fetch":
@@ -53,6 +54,33 @@ class Gate:
             if cmd == p or cmd.startswith(p + " ") or cmd.startswith(p + "\t"):
                 return allowlisted
         return other
+
+    def _computer_ring(self, args: dict) -> int:
+        op = self.cfg.get("operator") or {}
+        silent = int(op.get("ring", 1))
+        other = int(op.get("ring_other", 2))
+        action = str(args.get("action") or "")
+        if action in {"see", "snapshot", "list_windows"}:
+            return silent
+        app = str(args.get("app") or "").strip().lower()
+        xy = args.get("x") is not None and args.get("y") is not None
+        if xy and action in {"click", "type", "keys", "scroll"} and not app:
+            return silent
+        if not app:
+            return silent
+        if app in self.session_grants:
+            return silent
+        allow = {str(k).lower() for k in (op.get("allowlist") or {})}
+        if app in allow:
+            return silent
+        return other
+
+    def _grant_computer(self, tool: str, args: dict) -> None:
+        if tool != "computer":
+            return
+        app = str(args.get("app") or "").strip().lower()
+        if app:
+            self.session_grants.add(app)
 
     def _files_ring(self, args: dict) -> int:
         files = self.cfg.get("files", {})
@@ -92,7 +120,14 @@ class Gate:
         if tool == "browser":
             return f"browser {args.get('action', '')}: {args.get('url') or args.get('ref') or ''}"
         if tool == "computer":
-            return f"computer {args.get('action', '')} {args.get('app', '')} {args.get('ref') or ''}".strip()
+            extra = " (not on operator allowlist)" if self._computer_ring(args) >= 2 else ""
+            xy = ""
+            if args.get("x") is not None and args.get("y") is not None:
+                xy = f" @{args.get('x')},{args.get('y')}"
+            return (
+                f"computer {args.get('action', '')} {args.get('app', '')} "
+                f"{args.get('ref') or ''}{xy}{extra}"
+            ).strip()
         if tool == "kb_propose":
             return f"kb_propose: {args.get('statement') or args.get('name') or args}"
         if tool == "kb_consolidate":
@@ -135,18 +170,24 @@ class Gate:
             },
         )
         try:
-            return bool(await asyncio.wait_for(asyncio.shield(fut), timeout=expiry))
+            approved = bool(await asyncio.wait_for(asyncio.shield(fut), timeout=expiry))
         except asyncio.TimeoutError:
             if not fut.done():
                 expire_ok = str(self.cfg.get("card", {}).get("expire_action", "deny")) == "allow"
                 fut.set_result(expire_ok)
             self._pending.pop(card_id, None)
             self._cards.pop(card_id, None)
+            approved = bool(fut.result())
             self.bus.publish(
                 "approval.resolved",
-                {"id": card_id, "approved": bool(fut.result()), "expired": True},
+                {"id": card_id, "approved": approved, "expired": True},
             )
-            return bool(fut.result())
+            if approved:
+                self._grant_computer(tool, args)
+            return approved
+        if approved:
+            self._grant_computer(tool, args)
+        return approved
 
     async def ask(
         self,
