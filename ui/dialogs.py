@@ -9,7 +9,7 @@ from ui.renderer import console, render_sessions
 
 MODES = {
     "Code": "Full coding autonomy with shell, file edits, and test verification.",
-    "Architect": "Planning and design mode: inspects repo, drafts architecture specs without mutating files.",
+    "Architect": "Plan mode: inspects the repo, writes plan.md, waits for a/s/c/q. No other writes.",
     "Ask": "Q&A and explanation mode: read-only tools, no host execution.",
     "Fast": "Uses fast/cheap models for quick one-off answers and edits.",
 }
@@ -46,6 +46,7 @@ def show_shortcuts_dialog() -> None:
                 ("Send prompt", "Enter"),
                 ("Cancel current turn", "Ctrl+C"),
                 ("Cycle mode (Code / Architect / Ask / Fast)", "Shift+Tab"),
+                ("Approve / change / comment / quit waiting plan", "a / s / c / q"),
                 ("Keyboard shortcuts palette", "Ctrl+X / /shortcuts"),
                 ("Command reference / help", "/help"),
                 ("Exit / quit Friday", "Ctrl+Q / Ctrl+D / /exit"),
@@ -85,6 +86,7 @@ def show_shortcuts_dialog() -> None:
                 ("Runtime settings (clarify, slots, etc.)", "/settings"),
                 ("Reload YAML configs without restart", "/reload"),
                 ("Saved session browser", "/sessions · /resume [id]"),
+                ("Saved plans / reopen a plan", "/plans · /plan [id]"),
                 ("Start clean session", "/new"),
             ],
         ),

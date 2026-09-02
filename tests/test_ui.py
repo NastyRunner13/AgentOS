@@ -32,6 +32,7 @@ from ui.renderer import (
     render_facts,
     render_history,
     render_plan,
+    render_plans,
     render_proposals,
     render_roles,
     render_sessions,
@@ -70,7 +71,7 @@ def test_completer_matches_root_slash_commands():
 
 
 def test_completer_includes_session_commands():
-    for cmd in ("/new", "/resume", "/sessions", "/rename", "/exit", "/shortcuts", "/plan", "/listen", "/orb"):
+    for cmd in ("/new", "/resume", "/sessions", "/rename", "/exit", "/shortcuts", "/plan", "/plans", "/listen", "/orb"):
         assert cmd in SLASH_COMMANDS
     completer = FridayCommandCompleter()
     texts = [m.text for m in completer.get_completions(Document(text="/re"), CompleteEvent())]
@@ -155,6 +156,8 @@ def test_resolve_slash_routes_builtins_and_skills(tmp_path: Path):
     assert resolve_slash("/resume abc", skills) == ("command", "resume", "abc")
     assert resolve_slash("/shortcuts", skills) == ("command", "shortcuts", "")
     assert resolve_slash("/plan", skills) == ("command", "plan", "")
+    assert resolve_slash("/plans", skills) == ("command", "plans", "")
+    assert resolve_slash("/plan abc", skills) == ("command", "plan", "abc")
     assert resolve_slash("/listen open notepad", skills) == ("command", "listen", "open notepad")
     assert resolve_slash("/orb", skills) == ("command", "orb", "")
     assert resolve_slash("/commit fix typo", skills) == ("skill", "commit", "fix typo")
@@ -305,7 +308,9 @@ def test_render_functions_do_not_crash(tmp_path: Path):
     render_sessions([{"id": "abc", "updated_at": "2026-01-01T00:00:00", "mode": "Code", "title": "hi"}], "abc")
     render_sessions([])
     render_plan("plan.md", ["1. Step one", "2. Step two"])
+    render_plan("plan.md", ["1. Step one"], status="waiting_approval")
     render_plan("plan.md")
+    render_plans([])
     render_shortcuts()
     show_mode_dialog("Code")
     show_shortcuts_dialog()

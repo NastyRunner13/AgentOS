@@ -22,6 +22,8 @@ from prompt_toolkit.layout.processors import AfterInput, ConditionalProcessor
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame, TextArea
 
+from ui.plans import PLAN_APPROVE, PLAN_CHANGES, PLAN_COMMENT, PLAN_QUIT
+
 COMPOSER_STYLE = Style.from_dict(
     {
         "frame.border": "#505050",
@@ -88,15 +90,19 @@ class Composer:
         history_path: Path,
         *,
         on_cycle_mode: Callable[[], None] | None = None,
+        get_input_mode: Callable[[], str] | None = None,
     ) -> None:
         self.completer = completer
         self.get_toolbar = get_toolbar
         self.get_title = get_title
         self.on_cycle_mode = on_cycle_mode
+        self.get_input_mode = get_input_mode or (lambda: "normal")
+        self._free_text = False
         history_path.parent.mkdir(parents=True, exist_ok=True)
         self.history = FileHistory(str(history_path))
 
     async def prompt_async(self, *args: Any, **kwargs: Any) -> str:
+        self._free_text = False
         box: list[TextArea] = []
         cols = _term_cols()
         input_height = 3 if cols >= 48 else 2
@@ -112,7 +118,7 @@ class Composer:
             dont_extend_height=True,
             input_processors=[
                 ConditionalProcessor(
-                    AfterInput(HTML('<style fg="#6c6c6c">message, @file, or /command</style>')),
+                    AfterInput(self._placeholder),
                     filter=Condition(lambda: not box or box[0].buffer.text == ""),
                 )
             ],
@@ -182,6 +188,42 @@ class Composer:
                 self.on_cycle_mode()
             event.app.invalidate()
 
+        def _plan_empty() -> bool:
+            return (
+                self.get_input_mode() == "plan_approval"
+                and textarea.buffer.text == ""
+                and not self._free_text
+            )
+
+        @kb.add("a", filter=Condition(_plan_empty), eager=True)
+        def _plan_a(event) -> None:
+            event.app.exit(result=PLAN_APPROVE)
+
+        @kb.add("s", filter=Condition(_plan_empty), eager=True)
+        def _plan_s(event) -> None:
+            event.app.exit(result=PLAN_CHANGES)
+
+        @kb.add("c", filter=Condition(_plan_empty), eager=True)
+        def _plan_c(event) -> None:
+            event.app.exit(result=PLAN_COMMENT)
+
+        @kb.add("q", filter=Condition(_plan_empty), eager=True)
+        def _plan_q(event) -> None:
+            event.app.exit(result=PLAN_QUIT)
+
+        @kb.add(
+            "tab",
+            filter=Condition(
+                lambda: self.get_input_mode() == "plan_approval"
+                and textarea.buffer.text == ""
+                and textarea.buffer.complete_state is None
+            ),
+            eager=True,
+        )
+        def _plan_tab(event) -> None:
+            self._free_text = True
+            event.app.invalidate()
+
         @kb.add("c-c")
         def _interrupt(event) -> None:
             event.app.exit(exception=KeyboardInterrupt())
@@ -206,8 +248,37 @@ class Composer:
         result = await app.run_async()
         return "" if result is None else str(result)
 
+    def _placeholder(self) -> AnyFormattedText:
+        mode = self.get_input_mode()
+        if mode == "plan_approval" and not getattr(self, "_free_text", False):
+            text = "a approve · s changes · c comment · q quit"
+        elif mode in ("plan_approval", "plan_feedback"):
+            text = "feedback on the plan, or /command"
+        else:
+            text = "message, @file, or /command"
+        return HTML(f'<style fg="#6c6c6c">{text}</style>')
+
     def _hint(self) -> AnyFormattedText:
         cols = _term_cols()
+        mode = self.get_input_mode()
+        if mode == "plan_approval" and not getattr(self, "_free_text", False):
+            if cols >= 64:
+                return HTML(
+                    '<style fg="#6c6c6c">'
+                    '<style fg="#e1e1e1">a</style>:approve  │  '
+                    '<style fg="#e1e1e1">s</style>:changes  │  '
+                    '<style fg="#e1e1e1">c</style>:comment  │  '
+                    '<style fg="#e1e1e1">q</style>:quit  │  '
+                    '<style fg="#e1e1e1">Tab</style>:prompt'
+                    "</style>"
+                )
+            return HTML(
+                '<style fg="#6c6c6c">'
+                '<style fg="#e1e1e1">a</style>:approve  │  '
+                '<style fg="#e1e1e1">q</style>:quit  │  '
+                '<style fg="#e1e1e1">Tab</style>:prompt'
+                "</style>"
+            )
         if cols >= 78:
             return HTML(
                 '<style fg="#6c6c6c">'
@@ -237,6 +308,7 @@ def create_composer(
     history_path: Path,
     *,
     on_cycle_mode: Callable[[], None] | None = None,
+    get_input_mode: Callable[[], str] | None = None,
 ) -> Optional[Composer]:
     if not sys.stdin.isatty():
         return None
@@ -249,6 +321,7 @@ def create_composer(
             get_title,
             history_path,
             on_cycle_mode=on_cycle_mode,
+            get_input_mode=get_input_mode,
         )
     except Exception:
         return None

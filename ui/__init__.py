@@ -21,6 +21,7 @@ from ui.renderer import (
     render_facts,
     render_history,
     render_plan,
+    render_plans,
     render_proposals,
     render_roles,
     render_sessions,
@@ -30,12 +31,14 @@ from ui.renderer import (
     render_tool_call,
     render_user,
 )
+from ui.plans import PlanStore
 from ui.sessions import SessionStore
 from ui.workspace import display_cwd, git_branch
 
 __all__ = [
     "FridayCommandCompleter",
     "SLASH_COMMANDS",
+    "PlanStore",
     "SessionStore",
     "TurnRenderer",
     "console",
@@ -50,6 +53,7 @@ __all__ = [
     "render_facts",
     "render_history",
     "render_plan",
+    "render_plans",
     "render_proposals",
     "render_roles",
     "render_sessions",

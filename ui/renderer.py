@@ -413,7 +413,7 @@ def render_plan(
     status: str = "",
     out: Console | None = None,
 ) -> None:
-    """Print workspace plan.md when it exists. Does not invent a plan."""
+    """Print a plan viewer. Does not invent a plan."""
     c = out or console
     if not lines:
         c.print(f"[dim #8b8b90]No {filename} in the workspace.[/dim #8b8b90]")
@@ -430,14 +430,81 @@ def render_plan(
 
     header = Text()
     header.append("◆ ", style="bold #e0af68")
-    header.append(status or filename, style="bold #e0af68")
+    header.append(filename, style="bold #e0af68")
+    if status:
+        header.append(f"  {status.replace('_', ' ')}", style="dim #8b8b90")
+
+    bits: list[RenderableType] = [header, Text(), content]
+    if status == "waiting_approval":
+        actions = Text()
+        actions.append("a", style="bold #00ff00")
+        actions.append(" approve", style="dim #8b8b90")
+        actions.append(" | ", style="dim #6c6c6c")
+        actions.append("s", style="bold #e0af68")
+        actions.append(" request changes", style="dim #8b8b90")
+        actions.append(" | ", style="dim #6c6c6c")
+        actions.append("c", style="bold #8db0ff")
+        actions.append(" comment", style="dim #8b8b90")
+        actions.append(" | ", style="dim #6c6c6c")
+        actions.append("q", style="bold #f38ba8")
+        actions.append(" quit plan", style="dim #8b8b90")
+        bits.append(Text())
+        bits.append(actions)
+        wait = Text()
+        wait.append("◆ ", style="bold #e0af68")
+        wait.append("Waiting on plan approval", style="thought")
+        bits.append(wait)
+    elif status == "approved":
+        bits.append(Text())
+        bits.append(Text("◆ Plan approved", style="success"))
+    elif status == "discarded":
+        bits.append(Text())
+        bits.append(Text("◆ Plan discarded", style="warning"))
+    elif status == "changes_requested":
+        bits.append(Text())
+        bits.append(Text("◆ Changes requested", style="amber"))
+
     c.print(
         Panel(
-            Group(header, Text(), content),
+            Group(*bits),
             title=filename,
             border_style="#e0af68",
             padding=(0, 1),
         )
+    )
+
+
+def render_plans(
+    rows: list[dict[str, Any]],
+    current_id: str = "",
+    out: Console | None = None,
+) -> None:
+    c = out or console
+    if not rows:
+        c.print("[dim #8b8b90]No saved plans.[/dim #8b8b90]")
+        return
+    table = Table(
+        title="◆ Saved Plans",
+        border_style="#505050",
+        header_style="bold #e0af68",
+        expand=True,
+    )
+    table.add_column("ID", style="dim #8b8b90", min_width=8, max_width=12)
+    table.add_column("Status", style="bold #e0af68", min_width=10, max_width=18)
+    table.add_column("Updated", style="white", min_width=12, max_width=20)
+    table.add_column("Title", style="white", overflow="fold")
+    for row in rows:
+        pid = str(row.get("id", ""))
+        marker = "● " if pid == current_id else "  "
+        table.add_row(
+            marker + pid,
+            str(row.get("status") or "").replace("_", " "),
+            str(row.get("updated_at", ""))[:19].replace("T", " "),
+            str(row.get("title") or "(untitled)"),
+        )
+    c.print(table)
+    c.print(
+        "[dim #8b8b90]/plan to open the current one · /plan <id> to load[/dim #8b8b90]"
     )
 
 

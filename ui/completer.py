@@ -20,7 +20,8 @@ SLASH_COMMANDS: dict[str, str] = {
     "/settings": "Adjust runtime parameters (clarify, max steps, slots)",
     "/shortcuts": "View keyboard shortcuts & command palette (Ctrl+X)",
     "/keys": "Alias for /shortcuts",
-    "/plan": "View active plan and review actions",
+    "/plan": "View waiting plan, latest, or /plan <id>",
+    "/plans": "List saved Architect plans",
     "/facts": "View confirmed long-term memory facts",
     "/proposals": "View pending Librarian memory proposals",
     "/consolidate": "Trigger Librarian consolidation draft",
@@ -57,6 +58,7 @@ BUILTIN_COMMANDS = {
     "shortcuts",
     "keys",
     "plan",
+    "plans",
     "facts",
     "proposals",
     "consolidate",
@@ -188,6 +190,21 @@ class FridayCommandCompleter(Completer):
                                     start_position=-len(arg_prefix),
                                     display=tid,
                                     display_meta=f"Task [{t.status}]: {t.title[:30]}",
+                                )
+                    return
+
+                if cmd == "/plan":
+                    store = stack.get("plans")
+                    if store and hasattr(store, "list"):
+                        for row in store.list():
+                            pid = str(row.get("id", ""))
+                            title = str(row.get("title") or "(untitled)")
+                            if pid.startswith(arg_prefix) or arg_prefix.lower() in title.lower():
+                                yield Completion(
+                                    pid,
+                                    start_position=-len(arg_prefix),
+                                    display=pid,
+                                    display_meta=f"{row.get('status', '')} · {title[:40]}",
                                 )
                     return
 

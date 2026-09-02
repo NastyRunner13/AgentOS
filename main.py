@@ -111,6 +111,7 @@ def boot(root: Path):
         bus,
         system_prompt=str(prompts.get("master") or "You are Friday."),
         clarify_prompt=str(prompts.get("clarify") or ""),
+        architect_prompt=str(prompts.get("architect") or ""),
         clarify=bool(kernel_cfg.get("clarify", True)),
         max_tool_steps=int(kernel_cfg.get("max_tool_steps", 16)),
         secrets=collect_secrets(models_cfg, perm_cfg, voice_cfg, env_path=root / ".env"),
@@ -140,7 +141,8 @@ HELP = """\
   [bold white]/sessions[/bold white]              List saved conversations
   [bold white]/rename <title>[/bold white]        Name the current session
   [bold white]/shortcuts[/bold white]             Full keyboard shortcuts & command palette (Ctrl+X)
-  [bold white]/plan[/bold white]                  Inspect active plan review block
+  [bold white]/plan [id][/bold white]             Show waiting plan, latest, or a saved id
+  [bold white]/plans[/bold white]                 List saved Architect plans
   [bold white]@path[/bold white]                  Attach a workspace file (Tab completes)
   [bold white]/help[/bold white]                  This cheatsheet
   [bold white]/mode [name][/bold white]           Code, Architect, Ask, Fast
@@ -168,13 +170,18 @@ HELP = """\
 
 
 def _create_prompt_session(
-    stack_getter, get_toolbar, get_title, history_path: Path, on_cycle_mode=None
+    stack_getter, get_toolbar, get_title, history_path: Path, on_cycle_mode=None, get_input_mode=None
 ):
     """Framed composer, or a two-line PromptSession if the box cannot start."""
     from ui.composer import create_composer
 
     box = create_composer(
-        stack_getter, get_toolbar, get_title, history_path, on_cycle_mode=on_cycle_mode
+        stack_getter,
+        get_toolbar,
+        get_title,
+        history_path,
+        on_cycle_mode=on_cycle_mode,
+        get_input_mode=get_input_mode,
     )
     if box is not None:
         return box
@@ -246,6 +253,7 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
         render_facts,
         render_history,
         render_plan,
+        render_plans,
         render_proposals,
         render_roles,
         render_sessions,
@@ -270,9 +278,29 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
     data_dir = root / str(stack["kernel_cfg"].get("data_dir", "data"))
     store = SessionStore(data_dir / "sessions")
     stack["sessions"] = store
+    from ui.plans import PlanStore, execute_prompt, plan_action, revise_prompt, updated_plan_body
+
+    plans = PlanStore(data_dir / "plans")
+    stack["plans"] = plans
     renderer = TurnRenderer(console)
     current_mode = "Code"
     ui_state = {"foreground": False, "prompt_up": False}
+    plan_state = {"waiting_id": None, "collecting": ""}
+
+    def input_mode() -> str:
+        if plan_state["collecting"]:
+            return "plan_feedback"
+        if plan_state["waiting_id"]:
+            return "plan_approval"
+        return "normal"
+
+    def mode_label() -> str:
+        im = input_mode()
+        if im == "plan_approval":
+            return "plan approval"
+        if im == "plan_feedback":
+            return "plan feedback"
+        return current_mode
 
     async def watch(topic: str, handler) -> None:
         q = bus.subscribe(topic)
@@ -373,14 +401,15 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
             from prompt_toolkit import PromptSession
 
             choice = await PromptSession().prompt_async(
-                HTML('<style fg="#f38ba8">  allow?</style> <style fg="#6c7086">[y/n]</style> ')
+                HTML('<style fg="#f38ba8">  allow?</style> <style fg="#6c7086">[y/n/1/2]</style> ')
                 if HTML
-                else "  allow? [y/n] "
+                else "  allow? [y/n/1/2] "
             )
         except (EOFError, KeyboardInterrupt, Exception):
             choice = "n"
         if cid in gate.pending():
-            ok = str(choice).strip().lower() in ("y", "yes", "a", "allow")
+            raw = str(choice).strip().lower()
+            ok = raw in ("1", "y", "yes", "a", "allow") or raw.startswith("1.") or raw.startswith("/approve")
             gate.resolve(cid, ok)
             console.print("[green]allowed[/green]" if ok else "[yellow]denied[/yellow]")
 
@@ -476,7 +505,7 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
                     f" {html.escape(cwd_s)} │"
                     f"{branch_bit}"
                     f" <style fg='#8b8b90'>{m_model}</style> │"
-                    f" <style fg='#e0af68'>{html.escape(current_mode)}</style> │"
+                    f" <style fg='#e0af68'>{html.escape(mode_label())}</style> │"
                     f" <style fg='#8b8b90'>{html.escape(store.id)}</style> │"
                     f"{card_bit}"
                     f" {facts_cnt} facts │"
@@ -489,14 +518,14 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
                     f" {html.escape(short_cwd)} │"
                     f"{branch_bit}"
                     f" <style fg='#8b8b90'>{short_model}</style> │"
-                    f" <style fg='#e0af68'>{html.escape(current_mode)}</style> │"
+                    f" <style fg='#e0af68'>{html.escape(mode_label())}</style> │"
                     f"{card_bit}"
                     f"{task_bit}"
                     f" <style fg='#e0af68'>Ctrl+X</style> "
                 )
             else:
                 return HTML(
-                    f" <style fg='#e0af68'>{html.escape(current_mode)}</style> │"
+                    f" <style fg='#e0af68'>{html.escape(mode_label())}</style> │"
                     f"{card_bit}"
                     f" <style fg='#e0af68'>Ctrl+X</style> "
                 )
@@ -504,8 +533,9 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
             return HTML(" <b>Friday</b> │ /shortcuts ") if HTML else None
 
     def get_composer_title():
+        shown = mode_label()
         if HTML is None:
-            return f"{store.id} {current_mode}"
+            return f"{store.id} {shown}"
         cwd_s, branch_s = workspace_bits()
         cols = shutil.get_terminal_size(fallback=(100, 24)).columns
         bits = []
@@ -514,7 +544,7 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
             if branch_s:
                 bits.append(f'<style fg="#00ff00">git:{html.escape(branch_s)}</style>')
             bits.append(f'<style fg="#8b8b90">{html.escape(store.id)}</style>')
-            bits.append(f'<style fg="#e0af68">{html.escape(current_mode)}</style>')
+            bits.append(f'<style fg="#e0af68">{html.escape(shown)}</style>')
             title = html.escape((store.title or "new session")[:24])
             bits.append(f'<style fg="#8b8b90">{title}</style>')
         elif cols >= 60:
@@ -523,9 +553,9 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
             if branch_s:
                 bits.append(f'<style fg="#00ff00">git:{html.escape(branch_s)}</style>')
             bits.append(f'<style fg="#8b8b90">{html.escape(store.id)}</style>')
-            bits.append(f'<style fg="#e0af68">{html.escape(current_mode)}</style>')
+            bits.append(f'<style fg="#e0af68">{html.escape(shown)}</style>')
         else:
-            bits.append(f'<style fg="#e0af68">{html.escape(current_mode)}</style>')
+            bits.append(f'<style fg="#e0af68">{html.escape(shown)}</style>')
             bits.append(f'<style fg="#8b8b90">{html.escape(store.id)}</style>')
         return HTML(" · ".join(bits))
 
@@ -536,6 +566,7 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
         i = next((n for n, m in enumerate(MODES) if m.lower() == current_mode.lower()), 0)
         current_mode = MODES[(i + 1) % len(MODES)]
         store.mode = current_mode
+        master.mode = current_mode
 
     session = _create_prompt_session(
         lambda: stack,
@@ -543,6 +574,7 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
         get_composer_title,
         data_dir / ".cli_history",
         on_cycle_mode=cycle_mode,
+        get_input_mode=input_mode,
     )
 
     async def read_line() -> str:
@@ -570,16 +602,35 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
 
     turn_lock = asyncio.Lock()
 
+    def show_plan(plan) -> None:
+        render_plan("plan.md", (plan.body or "").splitlines() or [""], status=plan.status)
+
+    def present_written_plan(before: str | None) -> None:
+        body = updated_plan_body(current_mode, root / "plan.md", before)
+        if body is None:
+            return
+        plan = plans.upsert_waiting(store.id, body)
+        plan_state["waiting_id"] = plan.id
+        show_plan(plan)
+
     async def run_foreground(prompt: str, *, shown: str, skip_clarify: bool = False) -> None:
         async with turn_lock:
             render_user(shown)
+            master.mode = current_mode
+            plan_path = root / "plan.md"
+            before_plan = None
+            if current_mode.lower() == "architect" and plan_path.is_file():
+                try:
+                    before_plan = plan_path.read_text(encoding="utf-8")
+                except OSError:
+                    before_plan = None
             if not session:
-                asyncio.create_task(master.turn(prompt, skip_clarify=skip_clarify))
+                asyncio.create_task(master.turn(prompt, skip_clarify=skip_clarify, mode=current_mode))
                 return
             renderer.begin_turn()
             ui_state["foreground"] = True
             try:
-                await master.turn(prompt, skip_clarify=skip_clarify)
+                await master.turn(prompt, skip_clarify=skip_clarify, mode=current_mode)
             except (KeyboardInterrupt, asyncio.CancelledError):
                 console.print("[yellow]turn cancelled[/yellow]")
             except Exception as exc:
@@ -589,6 +640,7 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
                 ui_state["foreground"] = False
                 renderer.finish()
                 store.save(master.history, current_mode)
+                present_written_plan(before_plan)
 
     async def voice_turn(text: str) -> str:
         await run_foreground(text, shown=f"(voice) {text}")
@@ -715,13 +767,31 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
             if line in ("/shortcuts", "/keys"):
                 show_shortcuts_dialog()
                 continue
-            if line == "/plan":
-                plan_file = root / "plan.md"
-                if plan_file.is_file():
-                    lines = plan_file.read_text(encoding="utf-8").splitlines()
-                    render_plan("plan.md", lines)
+            if line == "/plans":
+                render_plans(plans.list(), plan_state["waiting_id"] or "")
+                continue
+            if line == "/plan" or line.startswith("/plan "):
+                needle = line.split(None, 1)[1].strip() if " " in line else ""
+                plan = None
+                if needle:
+                    try:
+                        plan = plans.get(needle)
+                    except KeyError as exc:
+                        console.print(f"[bold red]{exc}[/bold red]")
+                        continue
                 else:
-                    render_plan("plan.md")
+                    plan = plans.waiting_for(store.id) or plans.latest_for(store.id)
+                if plan is None:
+                    plan_file = root / "plan.md"
+                    if plan_file.is_file():
+                        lines = plan_file.read_text(encoding="utf-8").splitlines()
+                        render_plan("plan.md", lines)
+                    else:
+                        render_plan("plan.md")
+                    continue
+                show_plan(plan)
+                if plan.status == "waiting_approval":
+                    plan_state["waiting_id"] = plan.id
                 continue
             if line == "/help":
                 console.print(HELP)
@@ -735,6 +805,8 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
                 store.create(current_mode)
                 master.history = []
                 master._awaiting_clarify = False
+                plan_state["waiting_id"] = None
+                plan_state["collecting"] = ""
                 paint_shell(notice=f"[bold]new session[/bold]  [dim]{store.id}[/dim]")
                 continue
             if line == "/sessions":
@@ -760,6 +832,10 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
                 master.history = list(store.history)
                 master._awaiting_clarify = False
                 current_mode = store.mode or current_mode
+                master.mode = current_mode
+                plan_state["collecting"] = ""
+                waiting = plans.waiting_for(store.id)
+                plan_state["waiting_id"] = waiting.id if waiting else None
                 paint_shell(
                     replay=True,
                     notice=(
@@ -767,6 +843,8 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
                         f"[dim]{store.title or '(untitled)'} · {len(store.history)} messages[/dim]"
                     ),
                 )
+                if waiting:
+                    show_plan(waiting)
                 continue
             if line.startswith("/rename"):
                 title = line.split(None, 1)[1].strip() if " " in line else ""
@@ -795,6 +873,7 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
                         continue
                     current_mode = match
                     store.mode = current_mode
+                    master.mode = current_mode
                     console.print(f"[bold green]Mode {current_mode}[/bold green]")
                 else:
                     show_mode_dialog(current_mode)
@@ -821,6 +900,7 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
                 prompts = stack["registry"].cfg.get("prompts") or {}
                 master.system_prompt = str(prompts.get("master") or master.system_prompt)
                 master.clarify_prompt = str(prompts.get("clarify") or master.clarify_prompt)
+                master.architect_prompt = str(prompts.get("architect") or master.architect_prompt)
                 master.tools.perm_cfg = stack["perm_cfg"]
                 vpath = cfg_dir / "voice.yaml"
                 if vpath.is_file():
@@ -949,6 +1029,55 @@ async def run_cli(root: Path, *, voice_flag: bool = False) -> None:
 
                 t = tasks.spawn(title, factory)
                 console.print(f"[bold green]task {t.id} queued[/bold green] {title}")
+                continue
+
+            kind, payload = plan_action(
+                line,
+                waiting=bool(plan_state["waiting_id"]),
+                collecting=plan_state["collecting"],
+            )
+            if kind == "approve":
+                pid = plan_state["waiting_id"]
+                plan_state["waiting_id"] = None
+                plan_state["collecting"] = ""
+                plan = plans.set_status(pid, "approved")
+                current_mode = "Code"
+                store.mode = current_mode
+                master.mode = current_mode
+                show_plan(plan)
+                await run_foreground(
+                    execute_prompt(plan),
+                    shown="(approved plan)",
+                    skip_clarify=True,
+                )
+                continue
+            if kind == "quit":
+                pid = plan_state["waiting_id"]
+                plan_state["waiting_id"] = None
+                plan_state["collecting"] = ""
+                plan = plans.set_status(pid, "discarded")
+                show_plan(plan)
+                continue
+            if kind == "ask_changes":
+                plan_state["collecting"] = "changes"
+                console.print("[dim]describe the changes[/dim]")
+                continue
+            if kind == "ask_comment":
+                plan_state["collecting"] = "comment"
+                console.print("[dim]comment on the plan[/dim]")
+                continue
+            if kind in ("changes", "comment"):
+                pid = plan_state["waiting_id"]
+                plan_state["collecting"] = ""
+                plans.set_status(pid, "changes_requested", comment=f"{kind}: {payload}")
+                current_mode = "Architect"
+                store.mode = current_mode
+                master.mode = current_mode
+                await run_foreground(
+                    revise_prompt(payload, kind),
+                    shown=payload,
+                    skip_clarify=True,
+                )
                 continue
 
             await run_foreground(attach_files(line), shown=line)
