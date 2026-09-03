@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from brain.anthropic import AnthropicAdapter
-from brain.compat import OnToken
-from brain.fake import FakeAdapter
-from brain.gemini import GeminiAdapter
-from brain.groq import GroqAdapter
-from brain.ollama import OllamaAdapter
-from brain.openai_compat import OpenAICompat
+from brain.adapters.anthropic import AnthropicAdapter
+from brain.adapters.compat import OnToken
+from brain.adapters.fake import FakeAdapter
+from brain.adapters.gemini import GeminiAdapter
+from brain.adapters.groq import GroqAdapter
+from brain.adapters.ollama import OllamaAdapter
+from brain.adapters.openai import OpenAICompat
 
 
 class Registry:
