@@ -165,8 +165,12 @@ def test_computer_allowlisted_silent_unknown_card():
     assert gate.classify("computer", {"action": "click", "x": 10, "y": 20}) == 1
     assert gate.classify("computer", {"action": "scroll", "x": 10, "y": 20, "dy": -120}) == 1
     assert gate.classify("computer", {"action": "open", "app": "steam"}) == 2
-    assert gate.classify("computer", {"action": "click", "app": "notion"}) == 2
-    assert gate.classify("computer", {"action": "click", "app": "notion", "x": 1, "y": 2}) == 2
+    assert gate.classify("computer", {"action": "click", "app": "discord"}) == 2
+    assert gate.classify("computer", {"action": "click", "app": "discord", "x": 1, "y": 2}) == 2
+    assert gate.classify("computer", {"action": "open", "app": "brave"}) == 1
+    assert gate.classify("computer", {"action": "type", "text": "https://github.com"}) == 1
+    assert gate.classify("computer", {"action": "keys", "text": "{ENTER}"}) == 1
+    assert gate.classify("computer", {"action": "scroll", "dy": -120}) == 1
     assert "@40,80" in gate.preview("computer", {"action": "click", "x": 40, "y": 80})
     preview = gate.preview("computer", {"action": "open", "app": "steam"})
     assert "steam" in preview

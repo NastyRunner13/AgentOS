@@ -69,6 +69,8 @@ operator:
     msedge: {exe: msedge.exe, kind: playwright}
     edge: {exe: msedge.exe, kind: playwright}
     browser: {kind: playwright}
+    brave: {exe: brave.exe}
+    notion: {exe: Notion.exe}
     code: {exe: Code.exe}
     explorer: {exe: explorer.exe}
     spotify: {exe: Spotify.exe}
