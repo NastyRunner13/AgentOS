@@ -20,6 +20,9 @@ ARCHITECT_TOOLS = frozenset(
     {"files", "web_search", "web_fetch", "kb_read", "skill", "ask_user"}
 )
 ARCHITECT_BLOCK = "architect mode forbids this tool; write only plan.md"
+OBSERVE_COMPUTER = frozenset({"see", "snapshot", "list_windows"})
+COMPUTER_MUTATE = frozenset({"click", "type", "keys", "scroll", "open", "close", "focus"})
+SERIAL_ALONE = frozenset({"skill", "ask_user", "browser", "kb_consolidate"})
 
 OnToken = Callable[[str], None]
 
@@ -86,6 +89,16 @@ def _flatten_tool_turns(conv: list[dict]) -> list[dict]:
     return out
 
 
+def _billed_calls(calls: list[dict]) -> bool:
+    for call in calls:
+        fn = call.get("function") or {}
+        name = fn.get("name") or ""
+        action = str(_parse_args(fn.get("arguments", "")).get("action") or "")
+        if name != "computer" or action not in OBSERVE_COMPUTER:
+            return True
+    return False
+
+
 def _parse_args(raw: str) -> dict:
     raw = (raw or "").strip() or "{}"
     try:
@@ -93,6 +106,64 @@ def _parse_args(raw: str) -> dict:
         return val if isinstance(val, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+def _norm_path(raw: str) -> str:
+    return str(raw or "").replace("\\", "/").strip().lower()
+
+
+def _isolation_keys(name: str, args: dict) -> set[str]:
+    keys: set[str] = set()
+    if name == "files":
+        for key in ("path", "dest"):
+            path = _norm_path(str(args.get(key) or ""))
+            if path:
+                keys.add(f"files:{path}")
+    if name == "computer":
+        keys.add("computer")
+    return keys
+
+
+def _runs_alone(name: str, action: str, ring: int) -> bool:
+    if ring >= 2:
+        return True
+    if name in SERIAL_ALONE:
+        return True
+    if name == "computer" and action in COMPUTER_MUTATE:
+        return True
+    return False
+
+
+def _tool_groups(calls: list[dict], classify) -> list[list[dict]]:
+    """Split a model step into gather-able groups. Serial-alone calls are singletons."""
+    groups: list[list[dict]] = []
+    current: list[dict] = []
+    current_keys: set[str] = set()
+
+    def flush() -> None:
+        nonlocal current, current_keys
+        if current:
+            groups.append(current)
+        current = []
+        current_keys = set()
+
+    for call in calls:
+        fn = call.get("function") or {}
+        name = fn.get("name") or ""
+        args = _parse_args(fn.get("arguments", ""))
+        action = str(args.get("action") or "")
+        ring = int(classify(name, args))
+        keys = _isolation_keys(name, args)
+        if _runs_alone(name, action, ring):
+            flush()
+            groups.append([call])
+            continue
+        if current_keys & keys:
+            flush()
+        current.append(call)
+        current_keys |= keys
+    flush()
+    return groups
 
 
 def _attach_screen(conv: list[dict], result: str) -> None:
@@ -298,7 +369,11 @@ class Master:
 
     async def _loop(self, conv: list[dict], task: Task | None, on_token: OnToken | None) -> str:
         last = ""
-        for _ in range(self.max_tool_steps):
+        billed = 0
+        rounds = 0
+        max_rounds = max(self.max_tool_steps * 2, self.max_tool_steps)
+        while billed < self.max_tool_steps and rounds < max_rounds:
+            rounds += 1
             await self.drain_steer(task, conv)
             streamed: list[str] = []
 
@@ -343,46 +418,81 @@ class Master:
                 }
             )
             if not calls:
+                billed += 1
                 continue
             ordered = sorted(
                 calls,
                 key=lambda c: 0 if (c.get("function") or {}).get("name") == "skill" else 1,
             )
-            executed_gui_action = False
-            for call in ordered:
+            await self._execute_calls(ordered, conv, task)
+            if _billed_calls(ordered):
+                billed += 1
+        return last or "hit max tool steps"
+
+    async def _execute_calls(
+        self, calls: list[dict], conv: list[dict], task: Task | None
+    ) -> None:
+        executed_gui_action = False
+        skip_gui = json.dumps(
+            {
+                "error": "Screen state changed after previous action. Re-inspect screen (see/snapshot) before issuing further actions.",
+                "verified": False,
+            }
+        )
+        for group in _tool_groups(calls, self.gate.classify):
+            results: dict[str, str] = {}
+            skipped: set[str] = set()
+            runnable: list[dict] = []
+            for call in group:
                 fn_name = (call.get("function") or {}).get("name") or ""
-                fn_args = _parse_args((call.get("function") or {}).get("arguments", ""))
-                action = str(fn_args.get("action") or "")
-
-                if executed_gui_action and fn_name == "computer" and action in ("click", "type", "keys", "scroll", "open", "close", "focus"):
-                    result = json.dumps({
-                        "error": "Screen state changed after previous action. Re-inspect screen (see/snapshot) before issuing further actions.",
-                        "verified": False,
-                    })
-                    conv.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call.get("id", ""),
-                            "name": fn_name,
-                            "content": self.scrub(result),
-                        }
-                    )
-                    continue
-
-                result = await self._run_tool(call, task)
+                action = str(_parse_args((call.get("function") or {}).get("arguments", "")).get("action") or "")
+                cid = str(call.get("id") or "")
+                if executed_gui_action and fn_name == "computer" and action in COMPUTER_MUTATE:
+                    results[cid] = skip_gui
+                    skipped.add(cid)
+                else:
+                    runnable.append(call)
+            if len(runnable) == 1:
+                results[str(runnable[0].get("id") or "")] = await self._run_tool(runnable[0], task)
+            elif runnable:
+                gathered = await asyncio.gather(
+                    *[self._run_tool(c, task) for c in runnable],
+                    return_exceptions=True,
+                )
+                for call, result in zip(runnable, gathered):
+                    cid = str(call.get("id") or "")
+                    if isinstance(result, BaseException):
+                        err = f"tool error: {self.scrub(str(result))}"
+                        results[cid] = err
+                        fn_name = (call.get("function") or {}).get("name") or ""
+                        self.bus.publish(
+                            "tool.result",
+                            {
+                                "id": cid,
+                                "name": fn_name,
+                                "result": err[:500],
+                                "task_id": task.id if task else None,
+                            },
+                        )
+                    else:
+                        results[cid] = result
+            for call in group:
+                fn_name = (call.get("function") or {}).get("name") or ""
+                action = str(_parse_args((call.get("function") or {}).get("arguments", "")).get("action") or "")
+                cid = str(call.get("id") or "")
+                result = results.get(cid, "")
                 conv.append(
                     {
                         "role": "tool",
-                        "tool_call_id": call.get("id", ""),
+                        "tool_call_id": cid,
                         "name": fn_name,
                         "content": self.scrub(result),
                     }
                 )
-                if fn_name == "computer":
+                if fn_name == "computer" and cid not in skipped:
                     _attach_screen(conv, result)
-                    if action in ("click", "type", "keys", "scroll", "open", "close", "focus"):
+                    if action in COMPUTER_MUTATE:
                         executed_gui_action = True
-        return last or "hit max tool steps"
 
     async def _run_tool(self, call: dict, task: Task | None) -> str:
         fn = call.get("function") or {}
@@ -393,6 +503,7 @@ class Master:
         self.bus.publish(
             "tool.call",
             {
+                "id": call.get("id") or "",
                 "name": name,
                 "args": args,
                 "ring": self.gate.classify(name, args),
@@ -414,6 +525,7 @@ class Master:
             self.bus.publish(
                 "tool.result",
                 {
+                    "id": call.get("id") or "",
                     "name": name,
                     "result": self.scrub(result),
                     "task_id": task.id if task else None,
@@ -468,6 +580,7 @@ class Master:
         self.bus.publish(
             "tool.result",
             {
+                "id": call.get("id") or "",
                 "name": name,
                 "result": self.scrub(result)[:500],
                 "task_id": task.id if task else None,
