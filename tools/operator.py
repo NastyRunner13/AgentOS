@@ -81,6 +81,7 @@ class Operator:
         self.stuck = False
         self.trace: list[dict] = []
         self._stuck_payload: dict = {}
+        self._last_xy: tuple[int, int] | None = None
 
     def allowlisted(self, app: str) -> bool:
         key = (app or "").strip().lower()
@@ -134,8 +135,31 @@ class Operator:
             return await self._xy_act(action, app, args, xy)
         if action == "open":
             return await self._open(app, args)
+        if action in {"type", "keys", "scroll"} and not (app or "").strip():
+            if self.stuck:
+                return dict(self._stuck_payload)
+            return await self._focus_act(action, args)
+        if action == "click" and not (app or "").strip():
+            return self._item(
+                action,
+                app,
+                path="none",
+                verify_ok=False,
+                detail="click needs x,y in 0-1000 on the attached screenshot, or an allowlisted app + ref",
+            )
         if not self.allowlisted(app) and action != "snapshot":
-            return self._item(action, app, path="none", verify_ok=False, detail=f"{app!r} not on the operator allowlist")
+            item = self._item(
+                action,
+                app,
+                path="none",
+                verify_ok=False,
+                detail=(
+                    f"{app!r} not on the operator allowlist. "
+                    "Call computer see, then click/type/keys/scroll with x,y and no app."
+                ),
+            )
+            item.update(self._shot_fields())
+            return item
         if self.stuck and action in MUTATE:
             return dict(self._stuck_payload)
         if action == "snapshot":
@@ -233,7 +257,18 @@ class Operator:
         try:
             await self.a11y.open(app, url=args.get("url"))
         except Exception as exc:
-            return self._item("open", app, path="a11y", verify_ok=False, detail=str(exc))
+            seen = await self._see({"query": f"Find {app} on this screen so it can be clicked"})
+            seen["action"] = "open"
+            seen["app"] = app
+            seen["verified"] = False
+            seen["verify"] = {
+                "ok": False,
+                "detail": (
+                    f"{exc}. Open failed. Screen attached. Click {app} with "
+                    "x,y in 0-1000 (taskbar or Start). Do not stop."
+                ),
+            }
+            return seen
         self.app = app
         self.stuck = False
         self.fails = 0
@@ -356,6 +391,7 @@ class Operator:
             await self._pixels_do(action, {"coords": [x, y], "dy": args.get("dy")}, text)
         except Exception as exc:
             return self._after(action, app, "pixels", None, 1.0, False, str(exc), before, args)
+        self._last_xy = (x, y)
         await asyncio.sleep(0.3)
         after = await self._state(app)
         try:
@@ -376,6 +412,54 @@ class Operator:
         item.update(self._shot_fields())
         item["x"], item["y"] = xy
         item["screen_x"], item["screen_y"] = x, y
+        return item
+
+    async def _focus_act(self, action: str, args: dict) -> dict:
+        """type/keys/scroll with no app: last pixels click only. expect= required."""
+        expect = str(args.get("expect") or "").strip()
+        if not expect:
+            return self._item(
+                action,
+                "",
+                path="none",
+                verify_ok=False,
+                detail=(
+                    f"{action} with no x,y needs expect= so the kernel can verify. "
+                    "The focused window may not be the target. Pass expect and retry."
+                ),
+            )
+        if self._last_xy is None:
+            return self._item(
+                action,
+                "",
+                path="none",
+                verify_ok=False,
+                detail=(
+                    f"{action} with no x,y needs a prior click or x,y. "
+                    "No screen-center fallback."
+                ),
+            )
+        text = str(args.get("text") or "")
+        before = await self._state(self.app)
+        try:
+            if action == "scroll":
+                await self._pixels_do(
+                    action, {"coords": list(self._last_xy), "dy": args.get("dy")}, text
+                )
+            else:
+                await self.pixels.type_text(text)
+        except Exception as exc:
+            return self._after(action, "", "pixels", None, 1.0, False, str(exc), before, args)
+        await asyncio.sleep(0.3)
+        after = await self._state(self.app)
+        try:
+            await self.pixels.screenshot()
+        except Exception:
+            pass
+        ok = expect.lower() in after.lower()
+        detail = f"saw {expect!r}" if ok else f"did not see {expect!r}"
+        item = self._after(action, "", "pixels", None, 1.0, ok, detail, after, args)
+        item.update(self._shot_fields())
         return item
 
     def _shot_fields(self) -> dict:

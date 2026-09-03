@@ -135,6 +135,116 @@ async def test_operator_see_and_focus(tmp_path: Path):
     assert "windows" in res_wins or "verify" in res_wins
 
 
+async def test_operator_type_keys_scroll_without_app_use_pixels(tmp_path: Path):
+    """Live Brave trace: after a taskbar click, type without x,y was
+    rejected as '' not on the operator allowlist, then the model stopped.
+    """
+    a11y = ScriptedA11y()
+    pixels = CapturingPixels()
+    pixels.size = (1920, 1200)
+    orig_type = pixels.type_text
+
+    async def type_into_state(text):
+        await orig_type(text)
+        a11y.document += " " + text
+
+    pixels.type_text = type_into_state
+    orig_scroll = pixels.scroll_xy
+
+    async def scroll_into_state(x, y, dy):
+        await orig_scroll(x, y, dy)
+        a11y.document += " scrolled"
+
+    pixels.scroll_xy = scroll_into_state
+    op = _operator(tmp_path, a11y, pixels)
+    clicked = json.loads(await op.execute({"action": "click", "x": 40, "y": 80}))
+    assert clicked["verified"] is True
+    typed = json.loads(
+        await op.execute(
+            {
+                "action": "type",
+                "text": "https://github.com/nastyrunner13",
+                "expect": "github.com",
+            }
+        )
+    )
+    assert typed["verified"] is True
+    assert typed["path"] == "pixels"
+    assert pixels.typed == ["https://github.com/nastyrunner13"]
+    assert a11y.typed == []
+    keys = json.loads(await op.execute({"action": "keys", "text": "{ENTER}", "expect": "github.com"}))
+    assert keys["verified"] is True
+    assert pixels.typed[-1] == "{ENTER}"
+    scrolled = json.loads(await op.execute({"action": "scroll", "dy": -120, "expect": "scrolled"}))
+    assert scrolled["verified"] is True
+    assert pixels.scrolls == [(40, 80, -120)]
+
+
+async def test_focus_act_requires_expect_and_prior_click(tmp_path: Path):
+    pixels = CapturingPixels()
+    pixels.size = (1920, 1200)
+    op = _operator(tmp_path, ScriptedA11y(), pixels)
+    no_expect = json.loads(await op.execute({"action": "type", "text": "secret"}))
+    assert no_expect["verified"] is False
+    assert pixels.typed == []
+    assert "expect" in no_expect["verify"]["detail"]
+    no_click = json.loads(
+        await op.execute({"action": "type", "text": "secret", "expect": "secret"})
+    )
+    assert no_click["verified"] is False
+    assert pixels.typed == []
+    assert "prior click" in no_click["verify"]["detail"]
+    center = json.loads(
+        await op.execute({"action": "scroll", "dy": -120, "expect": "x"})
+    )
+    assert center["verified"] is False
+    assert pixels.scrolls == []
+    await op.execute({"action": "click", "x": 40, "y": 80})
+    miss = json.loads(
+        await op.execute({"action": "type", "text": "secret", "expect": "not-on-screen"})
+    )
+    assert pixels.typed == ["secret"]
+    assert miss["verified"] is False
+    assert miss.get("stuck") is False
+
+
+async def test_open_failure_attaches_screen_and_does_not_stop(tmp_path: Path):
+    a11y = ScriptedA11y()
+
+    async def boom(app, url=None):
+        raise RuntimeError("No windows for that process could be found")
+
+    a11y.open = boom
+    pixels = CapturingPixels()
+    op = _operator(tmp_path, a11y, pixels)
+    raw = json.loads(await op.execute({"action": "open", "app": "notepad"}))
+    assert raw["verified"] is False
+    assert raw.get("stuck") is False
+    assert "Do not stop" in raw["verify"]["detail"]
+    assert pixels.shots >= 1
+    assert raw.get("screenshot") or raw["verify"]["detail"]
+
+
+async def test_click_without_xy_or_app_explains_coords(tmp_path: Path):
+    op = _operator(tmp_path, ScriptedA11y(), CapturingPixels())
+    raw = json.loads(await op.execute({"action": "click"}))
+    assert raw["verified"] is False
+    assert "x,y" in raw["verify"]["detail"]
+
+
+def test_resolve_exe_prefers_existing_path(tmp_path: Path, monkeypatch):
+    from tools.a11y import resolve_exe
+
+    exe = tmp_path / "brave.exe"
+    exe.write_bytes(b"x")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    # KNOWN_EXES brave includes %LOCALAPPDATA%\BraveSoftware\... which will miss;
+    # spec path that exists wins.
+    assert resolve_exe("brave", {"exe": str(exe)}) == str(exe)
+    missing = resolve_exe("not-an-app", {"exe": "missing-bin.exe"})
+    assert missing.endswith("missing-bin.exe")
+
+
 async def test_operator_xy_click_and_scroll(tmp_path: Path):
     a11y = ScriptedA11y()
     pixels = CapturingPixels()

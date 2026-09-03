@@ -122,7 +122,10 @@ SPECS = [
                 "focus (switch window), list_windows, close. see attaches the screen image. "
                 "Prefer a11y ref. If no ref, pass x,y as 0-1000 on the attached screenshot "
                 "(0,0 top-left, 1000,1000 bottom-right). Do not convert to image pixels. "
-                "Execute only ONE computer action at a time. "
+                "type/keys/scroll with no app need a prior click and expect= (no screen-center fallback). "
+                "verified=false without stuck is not stuck — click or see and continue. "
+                "If open fails, a screenshot is attached — click and continue. "
+                "Execute only ONE mutating computer action at a time. "
                 "Allowlisted apps run silent. Unknown apps raise a card; after approval the app "
                 "is granted for this process. A11y first, pixels last. Actions verified."
             ),
