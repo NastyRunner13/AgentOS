@@ -34,17 +34,22 @@ Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY` (or retarget `config/
 | **Ring**, allowlist, **card** expiry, operator apps | `config/permissions.yaml` |
 | Slots, tool-step cap, clarify | `config/kernel.yaml` |
 | Memory **consolidate** stage and limits | `config/memory.yaml` (`stage` stays 0 or 1) |
+| Process wiring (YAML → Master) | `boot.py` |
+| CLI flags | `main.py` (`python main.py --cli` stays the entrypoint) |
 | Bus, tasks, **steer**, **card** wait | `kernel/` |
 | Registry, master, librarian | `brain/` |
+| LLM provider adapter | `brain/adapters/` |
 | L2 log, proposals, graph apply | `memory/` (`INSERT` into `facts`/`entities`/`edges` only inside `_apply` in `memory/graph.py`) |
-| Shell, files, browser, computer | `tools/` |
-| CLI renderer, slash menu, session files | `ui/` |
+| Shell, files, browser, computer | `tools/` (`NativeTools` in `tools/native.py`) |
+| Web HTML / URL safety | `tools/web_html.py`; search/fetch in `tools/web.py` |
+| CLI loop, composer, slash dispatch | `ui/cli.py`, `ui/commands.py` (register a command in the table + `SLASH_COMMANDS`) |
+| Transcript rendering | `ui/render/` (theme, banner, cards, inventory, turn) |
 | Voice engines, PTT, `tts.amplitude` | `voice/`, `config/voice.yaml` |
 | Voice orb overlay (bus subscriber) | `orb/` |
-| Scenario suite | `evals/` |
+| Scenario suite | `evals/` (`fakes.py`, `cases/`, `scenarios.py` registry) |
 | DONE WHEN coverage | `tests/test_phaseN.py` |
 
-Directories named in ARCHITECTURE.md §11 that are still absent (`mcp/`, `server/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) — do not import them. Do not scaffold them as empty packages. `ui/` is the CLI surface (`python main.py --cli`). `voice/` is Phase 4 and must not import `Master`. `orb/` is Phase 5 slice 1: it subscribes to the bus and never opens a mic.
+Directories named in ARCHITECTURE.md §11 that are still absent (`mcp/`, `server/`, `desktop/`, `dashboard/`, `workflows/`) — do not import them. Do not scaffold them as empty packages. `skills/` is SKILL.md content, not a Python package. `ui/` is the CLI surface (`python main.py --cli`). `voice/` is Phase 4 and must not import `Master`. `orb/` is Phase 5 slice 1: it subscribes to the bus and never opens a mic.
 
 ## Tests
 

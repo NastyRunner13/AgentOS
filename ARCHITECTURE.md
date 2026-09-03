@@ -483,21 +483,29 @@ AgentOS/
 ├─ AGENTARCH.md             ← phases, contracts, leading words
 ├─ PRINCIPLES.md            ← how we build; loops, graphs, unattended
 ├─ config/
-│  ├─ models.yaml  voice.yaml  permissions.yaml  mcp_servers.json
-├─ kernel/                  # event bus, sessions, task manager (concurrency), permission gate
-├─ brain/                   # model registry, master agent, sub-agent factory
-├─ memory/                  # sqlite events, lance/chroma vectors, kuzu graph, librarian
-├─ voice/                   # wakeword/, stt/, tts/, realtime/, vad/
-├─ tools/                   # shell, files, apps, browser(playwright), computer_use(SoM)
-├─ mcp/                     # client manager
-├─ server/                  # FastAPI + WS gateway (single event stream for all clients)
-├─ ui/                      # shared React components (chat, feed, approvals) used by both
-├─ desktop/                 # Tauri 2 app: main window + transparent orb overlay
-├─ dashboard/               # phone PWA build (reuses ui/)
-├─ skills/                  # SKILL.md library (user-editable, agent-extensible)
-├─ workflows/               # saved graphs, launched by name / chat / loop
-└─ main.py                  # entrypoint: boots kernel + selected voice mode
+│  ├─ models.yaml  voice.yaml  permissions.yaml  kernel.yaml  memory.yaml
+├─ boot.py                  # composition root: YAML → bus, gate, registry, master
+├─ main.py                  # flags only: --cli / --voice / --eval / --root
+├─ kernel/                  # event bus, task manager, permission gate
+├─ brain/                   # master, registry, librarian, planner, skills
+│  └─ adapters/             # anthropic, openai, ollama, groq, gemini, fake
+├─ memory/                  # sqlite L2, stage-1 graph, proposals
+├─ voice/                   # VoiceIO + YAML engines (wakeword/stt/tts folders later)
+├─ tools/                   # native.py dispatcher, shell, files, browser, operator, web
+├─ ui/                      # CLI surface (not the future React app)
+│  ├─ cli.py  commands.py   # loop + slash dispatch table
+│  └─ render/               # theme, banner, cards, inventory, turn
+├─ orb/                     # Phase 5 slice 1 voice overlay (bus subscriber)
+├─ evals/                   # harness, fakes, cases/, scenarios registry
+├─ skills/                  # SKILL.md library (content, not a Python package)
+├─ mcp/                     # later: client manager
+├─ server/                  # later: FastAPI + WS gateway
+├─ desktop/                 # later: Tauri 2 main window
+├─ dashboard/               # later: phone PWA
+└─ workflows/               # later: saved graphs
 ```
+
+`ui/` in this tree is the Phase 1 CLI. Shared React for desktop/phone is a later Phase 5 slice and does not live here yet.
 
 ## 12. Build Order — collapsed, trustworthy-core first
 

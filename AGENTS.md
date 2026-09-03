@@ -20,8 +20,8 @@ Python 3.11+ desktop agent kernel ("Friday") for Windows. Phases 1–2 are imple
 
 ## Reality vs plan
 
-- Existing packages: `kernel/` (bus, tasks, permission gate), `brain/` (registry, master, librarian), `memory/` (SQLite L2 + stage-1 graph/proposals), `tools/` (shell/files/browser/computer/kb_*), `voice/` (VoiceIO, YAML engines, no Master import), `orb/` (ElevenLabs orb overlay; bus subscriber only, no mic), `ui/` (CLI renderer, completer, session files), plus `config/` and `tests/`.
-- Directories in ARCHITECTURE.md §11 that are still absent (`mcp/`, `server/`, `desktop/`, `dashboard/`, `skills/`, `workflows/`) — don't import or build against them. `ui/` is the CLI surface only. `orb/` is Phase 5 slice 1 (voice orb), not the Tauri `desktop/` app.
+- Existing packages: `kernel/` (bus, tasks, permission gate), `brain/` (registry, master, librarian, `adapters/`), `memory/` (SQLite L2 + stage-1 graph/proposals), `tools/` (`native.py` dispatcher, shell/files/browser/computer/web), `voice/` (VoiceIO, YAML engines, no Master import), `orb/` (ElevenLabs orb overlay; bus subscriber only, no mic), `ui/` (CLI: `cli.py` loop, `commands.py` slash table, `render/`), plus `boot.py`, `config/`, `evals/`, and `tests/`.
+- Directories in ARCHITECTURE.md §11 that are still absent (`mcp/`, `server/`, `desktop/`, `dashboard/`, `workflows/`) — don't import or build against them. `skills/` is SKILL.md content, not a Python package. `ui/` is the CLI surface only. `orb/` is Phase 5 slice 1 (voice orb), not the Tauri `desktop/` app.
 
 ## Gotchas
 
