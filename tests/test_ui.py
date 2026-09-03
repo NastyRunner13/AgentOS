@@ -383,6 +383,27 @@ def test_turn_renderer_think_tags_split_across_tokens():
 
 
 
+def test_turn_renderer_matches_parallel_tools_by_id():
+    c, buf = _console()
+    renderer = TurnRenderer(c)
+    renderer.begin_turn()
+    renderer.on_tool_call("files", {"action": "read", "path": "a.txt"}, ring=0, call_id="a")
+    renderer.on_tool_call("files", {"action": "read", "path": "b.txt"}, ring=0, call_id="b")
+    renderer.on_tool_result("files", "B-body", call_id="b")
+    renderer.on_tool_result("files", "A-body", call_id="a")
+    renderer.finish()
+    out = buf.getvalue()
+    dones = []
+    for line in out.splitlines():
+        if "✓" in line and "done" in line:
+            if "b.txt" in line:
+                dones.append("b")
+            elif "a.txt" in line:
+                dones.append("a")
+    assert dones == ["b", "a"]
+    assert "2 tool" in out
+
+
 def test_turn_renderer_tools_and_footer():
     c, buf = _console()
     renderer = TurnRenderer(c)

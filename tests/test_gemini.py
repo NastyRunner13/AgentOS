@@ -11,7 +11,7 @@ import yaml
 
 from brain.gemini import GeminiAdapter, DEFAULT_GEMINI_BASE, DEFAULT_GEMINI_KEY_ENV
 from brain.registry import Registry
-from main import collect_secrets
+from boot import collect_secrets
 from ui.dialogs import show_provider_dialog
 
 ROOT = Path(__file__).resolve().parents[1]
